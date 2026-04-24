@@ -37,6 +37,7 @@ func TestGenerate_AllAuthSchemesCompile(t *testing.T) {
 		{"none", "minimal_none.hcl"},
 		{"oidc", "minimal_oidc.hcl"},
 		{"oidc_dynamic", "minimal_oidc_dynamic.hcl"},
+		{"openapi_proxy", "openapi_proxy.hcl"},
 	}
 
 	for _, tc := range cases {

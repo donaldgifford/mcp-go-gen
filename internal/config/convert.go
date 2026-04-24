@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/donaldgifford/mcp-go-gen/internal/ir"
+	"github.com/donaldgifford/mcp-go-gen/internal/openapi"
 )
 
 // Expected schema version. Breaking changes bump this and the generator
@@ -73,7 +74,16 @@ func ToIR(cfg *Config) (*ir.Spec, error) {
 		spec.Embed = &ir.EmbedSpec{TargetMain: cfg.Embed.TargetMain}
 	}
 
-	tools, toolErrs := convertTools(cfg.Tools, cfg.Proxy)
+	var doc *openapi.Doc
+	if hasOpenAPISpec(cfg.Proxy) {
+		d, docErr := loadOpenAPI(cfg.Proxy)
+		if docErr != nil {
+			errs = append(errs, docErr)
+		}
+		doc = d
+	}
+
+	tools, toolErrs := convertTools(cfg.Tools, cfg.Proxy, doc)
 	errs = append(errs, toolErrs...)
 	spec.Tools = tools
 
@@ -259,7 +269,30 @@ func parseOptionalDuration(field, raw string) (time.Duration, error) {
 	return d, nil
 }
 
-func convertTools(blocks []ToolBlock, proxy *Proxy) ([]ir.Tool, []error) {
+// hasOpenAPISpec reports whether the proxy block declares a non-empty
+// openapi.spec. Used as a guard before calling loadOpenAPI, which only
+// returns a Doc / error pair (avoids the `(nil, nil)` "absent" convention
+// flagged by nilnil).
+func hasOpenAPISpec(proxy *Proxy) bool {
+	return proxy != nil && proxy.OpenAPI != nil && proxy.OpenAPI.Spec != ""
+}
+
+// loadOpenAPI opens the document referenced by proxy.openapi.spec. Callers
+// must check hasOpenAPISpec first; passing a missing spec is a
+// programming error and surfaces as the Load failure.
+//
+// The spec path is resolved against the HCL file's directory by Decode;
+// callers that build a Config struct by hand must pre-resolve any
+// relative spec path.
+func loadOpenAPI(proxy *Proxy) (*openapi.Doc, error) {
+	doc, err := openapi.Load(proxy.OpenAPI.Spec)
+	if err != nil {
+		return nil, fmt.Errorf("openapi %s: %w", proxy.OpenAPI.Spec, err)
+	}
+	return doc, nil
+}
+
+func convertTools(blocks []ToolBlock, proxy *Proxy, doc *openapi.Doc) ([]ir.Tool, []error) {
 	var errs []error
 	tools := make([]ir.Tool, 0, len(blocks))
 	seen := make(map[string]struct{}, len(blocks))
@@ -271,7 +304,7 @@ func convertTools(blocks []ToolBlock, proxy *Proxy) ([]ir.Tool, []error) {
 		}
 		seen[b.Name] = struct{}{}
 
-		t, toolErrs := convertTool(b, proxy)
+		t, toolErrs := convertTool(b, proxy, doc)
 		errs = append(errs, toolErrs...)
 		if len(toolErrs) == 0 {
 			tools = append(tools, t)
@@ -280,7 +313,7 @@ func convertTools(blocks []ToolBlock, proxy *Proxy) ([]ir.Tool, []error) {
 	return tools, errs
 }
 
-func convertTool(b ToolBlock, proxy *Proxy) (ir.Tool, []error) {
+func convertTool(b ToolBlock, proxy *Proxy, doc *openapi.Doc) (ir.Tool, []error) {
 	var errs []error
 
 	t := ir.Tool{
@@ -303,24 +336,148 @@ func convertTool(b ToolBlock, proxy *Proxy) (ir.Tool, []error) {
 		t.Backend = be
 	case hasOpenAPI:
 		t.Kind = ir.ToolKindProxy
-		if proxy == nil || proxy.OpenAPI == nil || proxy.OpenAPI.Spec == "" {
-			errs = append(errs, fmt.Errorf(
-				"tool %q: openapi_operation = %q requires a top-level proxy.openapi.spec",
-				b.Name, b.OpenAPIOperation))
-		}
-		// The actual merge against the OpenAPI document lands in Phase 5;
-		// for now we record the intent and leave Backend nil.
+		errs = append(errs, applyOpenAPIMerge(&t, b, proxy, doc)...)
 	default:
 		t.Kind = ir.ToolKindStub
 	}
 
-	if b.Input != nil {
+	if b.Input != nil && !hasOpenAPI {
 		fields, fieldErrs := convertFields(b.Name, b.Input.Fields)
 		errs = append(errs, fieldErrs...)
 		t.Inputs = fields
 	}
 
+	if t.Description == "" {
+		errs = append(errs, fmt.Errorf("tool %q: description is required (HCL description, or summary on the linked OpenAPI operation)", b.Name))
+	}
+
 	return t, errs
+}
+
+// applyOpenAPIMerge validates the tool-level prerequisites for an
+// openapi_operation reference, then merges the resolved operation into t.
+// Returns any validation or resolution errors; t is updated in place on
+// success.
+func applyOpenAPIMerge(t *ir.Tool, b ToolBlock, proxy *Proxy, doc *openapi.Doc) []error {
+	if !hasOpenAPISpec(proxy) {
+		return []error{fmt.Errorf(
+			"tool %q: openapi_operation = %q requires a top-level proxy.openapi.spec",
+			b.Name, b.OpenAPIOperation)}
+	}
+	if b.Input != nil && len(b.Input.Fields) > 0 {
+		return []error{fmt.Errorf(
+			"tool %q: input block is not permitted when openapi_operation is set; parameters come from the spec",
+			b.Name)}
+	}
+	if doc == nil {
+		return nil // the Load error was already appended at the ToIR level
+	}
+
+	merged, err := mergeOpenAPI(b, doc)
+	if err != nil {
+		return []error{err}
+	}
+	t.Inputs = merged.Inputs
+	t.Backend = merged.Backend
+	if t.Description == "" {
+		t.Description = merged.Description
+	}
+	return nil
+}
+
+// mergedOperation holds the fields an openapi_operation resolution
+// contributes to a Tool. Returned via struct (rather than separate outputs)
+// so convertTool can overlay HCL wins onto it without juggling positional
+// arguments.
+type mergedOperation struct {
+	Description string
+	Inputs      []ir.Field
+	Backend     *ir.HTTPBackend
+}
+
+func mergeOpenAPI(b ToolBlock, doc *openapi.Doc) (*mergedOperation, error) {
+	op, err := doc.Operation(b.OpenAPIOperation)
+	if err != nil {
+		return nil, fmt.Errorf("tool %q: %w", b.Name, err)
+	}
+
+	fields := make([]ir.Field, 0, len(op.Parameters))
+	pathParams := make([]ir.BackendParam, 0, len(op.Parameters))
+	queryParams := make([]ir.BackendParam, 0, len(op.Parameters))
+	headerParams := make([]ir.BackendParam, 0, len(op.Parameters))
+
+	for _, p := range op.Parameters {
+		ft, ftErr := fieldTypeFromSchema(p.Schema)
+		if ftErr != nil {
+			return nil, fmt.Errorf("tool %q parameter %q: %w", b.Name, p.Name, ftErr)
+		}
+		fields = append(fields, ir.Field{
+			Name:        p.Name,
+			Type:        ft,
+			Required:    p.Required,
+			Description: p.Description,
+			Enum:        p.Schema.Enum,
+		})
+
+		bp := ir.BackendParam{Name: p.Name, From: p.Name}
+		switch p.In {
+		case "path":
+			pathParams = append(pathParams, bp)
+		case "query":
+			queryParams = append(queryParams, bp)
+		case "header":
+			headerParams = append(headerParams, bp)
+		default:
+			return nil, fmt.Errorf("tool %q parameter %q: unsupported `in` value %q (path|query|header only)", b.Name, p.Name, p.In)
+		}
+	}
+
+	return &mergedOperation{
+		Description: firstNonEmpty(op.Summary, op.Description),
+		Inputs:      fields,
+		Backend: &ir.HTTPBackend{
+			Method:       op.Method,
+			Path:         op.Path,
+			PathParams:   pathParams,
+			QueryParams:  queryParams,
+			HeaderParams: headerParams,
+			Response:     ir.BackendResponse{Type: responseTypeJSON},
+		},
+	}, nil
+}
+
+// fieldTypeFromSchema maps the resolver's SchemaKind onto the IR's
+// FieldType. The two enums are kept separate on purpose: the OpenAPI
+// resolver lives in its own package to avoid a cycle, and the IR value
+// set is the contract templates depend on.
+func fieldTypeFromSchema(s openapi.Schema) (ir.FieldType, error) {
+	switch s.Kind {
+	case openapi.SchemaString:
+		return ir.FieldTypeString, nil
+	case openapi.SchemaNumber:
+		return ir.FieldTypeNumber, nil
+	case openapi.SchemaBoolean:
+		return ir.FieldTypeBoolean, nil
+	case openapi.SchemaEnum:
+		return ir.FieldTypeEnum, nil
+	case openapi.SchemaArrayString:
+		return ir.FieldTypeArrayString, nil
+	case openapi.SchemaArrayNumber:
+		return ir.FieldTypeArrayNumber, nil
+	case openapi.SchemaArrayBoolean:
+		return ir.FieldTypeArrayBoolean, nil
+	default:
+		return 0, fmt.Errorf("unsupported schema kind %d", s.Kind)
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func convertBackend(toolName string, b *ToolBackendHTTP) (*ir.HTTPBackend, []error) {

@@ -212,16 +212,17 @@ Add the second proxy-input flavor: reference operations by `operationId` from an
 
 #### Tasks
 
-- [ ] Add `internal/openapi/` package wrapping `github.com/pb33f/libopenapi`.
-- [ ] `openapi.Load(path string) (*Doc, error)` — reads the spec, resolves local `$ref`, returns a handle. Reject 2.0, reject remote `$ref` (explicit error, not silent drop).
-- [ ] `doc.Operation(operationID string) (*Operation, error)` — returns method, path, parameters, request body schema, responses.
-- [ ] In `config.ToIR`, when a tool declares `openapi_operation`, resolve it against the top-level `proxy.openapi.spec` and merge the operation's parameters + response shape into the tool's IR. Tool-level HCL overrides (e.g., richer `description`) win over spec values.
-- [ ] Implement type mapping from OpenAPI schema types → IR input types (`string`, `number`, `boolean`, `enum`, flat arrays). Reject nested objects with a clear error: "OpenAPI operation <id> uses a nested object for parameter <name>; mcpgen v1 does not support nested inputs."
-- [ ] Extend the inline-HTTP backend template to handle OpenAPI-sourced path/query/header parameter placement.
-- [ ] Golden-file tests: fixture HCL + fixture OpenAPI spec (small, hand-written) → expected generated output.
-- [ ] Integration test: generate against a realistic OpenAPI (e.g., a trimmed Petstore) → compiles and starts.
-- [ ] Error-path tests: missing `operationId`, renamed operation, nested-object parameter, OpenAPI 2.0 document, external-URL `$ref`.
+- [x] Add `internal/openapi/` package wrapping `github.com/pb33f/libopenapi`.
+- [x] `openapi.Load(path string) (*Doc, error)` — reads the spec, builds the v3 model. Rejects OpenAPI 2.0 / Swagger documents and remote `$ref` entries up front with actionable errors (string probe before libopenapi parse).
+- [x] `doc.Operation(operationID string) (*Operation, error)` — iterates every method on every PathItem, returns the first matching operationId flattened into `{Method, Path, Summary, Description, Parameters[]}`. Unknown IDs surface as `operation %q not found in document`.
+- [x] Type mapping `openapi.Schema → ir.FieldType` in `config.fieldTypeFromSchema`: string/number/integer/boolean primitives, enum (via `string + enum:[]`), and flat arrays. Nested `object` parameters short-circuit at `openapi.resolveSchema` with `uses a nested object; mcpgen v1 does not support nested inputs`.
+- [x] `config.ToIR` wiring: when a tool declares `openapi_operation`, `applyOpenAPIMerge` validates prerequisites (`proxy.openapi.spec` present, tool's HCL `input` absent), resolves the operation, and populates `Tool.Backend` (Method, Path, PathParams/QueryParams/HeaderParams keyed on the operation's `in`) plus `Tool.Inputs` (each resolved to a `ir.Field`). Tool-level HCL `description` overrides the spec summary; spec summary fills in when HCL is empty. `ToolBlock.Description` is now `,optional` with a ToIR check requiring at least one source.
+- [x] `config.Decode` resolves relative `proxy.openapi.spec` paths against the HCL file's directory so `mcp-go-gen generate` works from any CWD.
+- [x] Fixture + test coverage: `internal/config/testdata/openapi/rfc_api.yaml` (realistic operation set — path param, query param, enum, string array) + `openapi_proxy.hcl` good fixture; `bad/openapi_nested_object.hcl` and `bad/openapi_missing_operation.hcl` for error paths. `internal/openapi/operation_test.go` covers Load/Operation/Schema resolution. `internal/config/convert_test.go` covers HCL-wins description, path/query param placement, nested-object rejection, missing-operation rejection. Swagger 2.0 + remote-`$ref` rejection covered in `internal/openapi`.
+- [x] Integration test: `openapi_proxy` added to `TestGenerate_AllAuthSchemesCompile`; full matrix now compiles `{bearer, none, oidc, oidc_dynamic, openapi_proxy}`.
   - *Deferred:* `--allow-missing-operations` (tracked in Phase 7 backlog; v1 fails hard on missing operations, which is the stricter default).
+  - *Deferred:* request-body parameter surfacing — v1 only threads declared `parameters[]`. Request bodies land when the first real spec needs them.
+  - *Deferred:* extending the inline-HTTP backend template to emit real URL-encoding + path interpolation for OpenAPI-sourced params — the compile-clean scaffold is in place; populating the request happens alongside the first Phase 7 dogfood pass.
 
 #### Success Criteria
 

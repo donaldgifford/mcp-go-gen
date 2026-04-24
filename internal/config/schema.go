@@ -160,10 +160,13 @@ type Embed struct {
 	TargetMain string `hcl:"target_main"`
 }
 
-// ToolBlock is a single top-level `tool "<name>" { ... }` block.
+// ToolBlock is a single top-level `tool "<name>" { ... }` block. Description
+// is optional — when openapi_operation is set the operation's summary
+// populates it; ToIR returns a validation error if the tool ends up with
+// no description from either source.
 type ToolBlock struct {
 	Name             string           `hcl:"name,label"`
-	Description      string           `hcl:"description"`
+	Description      string           `hcl:"description,optional"`
 	OpenAPIOperation string           `hcl:"openapi_operation,optional"`
 	Input            *ToolInput       `hcl:"input,block"`
 	Backend          *ToolBackendHTTP `hcl:"backend,block"`

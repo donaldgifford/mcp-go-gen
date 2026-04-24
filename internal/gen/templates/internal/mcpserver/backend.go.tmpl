@@ -3,8 +3,8 @@ package mcpserver
 
 import (
 	"net/http"
-	"os"
-	"time"
+	{{if .Proxy.Bearer}}"os"
+	{{end}}"time"
 )
 
 // Backend is the HTTP client proxy tools use to reach the upstream service.

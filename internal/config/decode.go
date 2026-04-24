@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -27,7 +28,21 @@ func Decode(path string) (*Config, hcl.Diagnostics) {
 			Subject:  &hcl.Range{Filename: path},
 		}}
 	}
-	return DecodeBytes(src, path)
+	cfg, diags := DecodeBytes(src, path)
+	if cfg != nil && cfg.Proxy != nil && cfg.Proxy.OpenAPI != nil {
+		cfg.Proxy.OpenAPI.Spec = resolveRelative(cfg.Proxy.OpenAPI.Spec, filepath.Dir(path))
+	}
+	return cfg, diags
+}
+
+// resolveRelative joins base with spec when spec is a relative path. Used
+// so openapi references in an HCL file resolve against the file's own
+// directory rather than the CLI caller's working directory.
+func resolveRelative(spec, base string) string {
+	if spec == "" || filepath.IsAbs(spec) {
+		return spec
+	}
+	return filepath.Join(base, spec)
 }
 
 // DecodeBytes parses src as HCL2 attributed to filename. It is exposed

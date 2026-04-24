@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -698,6 +699,85 @@ func TestToIR_NilConfigRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nil") {
 		t.Errorf("err = %v, want nil-mention", err)
+	}
+}
+
+func TestToIR_OpenAPIMergesOperation(t *testing.T) {
+	t.Parallel()
+
+	fixture := filepath.Join("testdata", "hcl", "good", "openapi_proxy.hcl")
+	cfg, diags := Decode(fixture)
+	if diags.HasErrors() {
+		t.Fatalf("decode: %s", diags.Error())
+	}
+	spec, err := ToIR(cfg)
+	if err != nil {
+		t.Fatalf("ToIR: %v", err)
+	}
+
+	if len(spec.Tools) != 2 {
+		t.Fatalf("want 2 tools, got %d", len(spec.Tools))
+	}
+
+	var getRfc *ir.Tool
+	for i := range spec.Tools {
+		if spec.Tools[i].Name == "get_rfc" {
+			getRfc = &spec.Tools[i]
+		}
+	}
+	if getRfc == nil {
+		t.Fatal("get_rfc tool not merged")
+	}
+
+	// HCL description wins over OpenAPI summary.
+	if !strings.Contains(getRfc.Description, "HCL description wins") {
+		t.Errorf("description = %q, want HCL override", getRfc.Description)
+	}
+	if getRfc.Backend == nil {
+		t.Fatal("Backend is nil after openapi merge")
+	}
+	if getRfc.Backend.Method != "GET" || getRfc.Backend.Path != "/rfcs/{id}" {
+		t.Errorf("backend = %s %s, want GET /rfcs/{id}", getRfc.Backend.Method, getRfc.Backend.Path)
+	}
+	if len(getRfc.Backend.PathParams) != 1 || getRfc.Backend.PathParams[0].Name != "id" {
+		t.Errorf("PathParams = %+v, want [id]", getRfc.Backend.PathParams)
+	}
+	if len(getRfc.Backend.QueryParams) != 1 || getRfc.Backend.QueryParams[0].Name != "include_draft" {
+		t.Errorf("QueryParams = %+v, want [include_draft]", getRfc.Backend.QueryParams)
+	}
+}
+
+func TestToIR_OpenAPIRejectsNestedObject(t *testing.T) {
+	t.Parallel()
+
+	fixture := filepath.Join("testdata", "hcl", "bad", "openapi_nested_object.hcl")
+	cfg, diags := Decode(fixture)
+	if diags.HasErrors() {
+		t.Fatalf("decode: %s", diags.Error())
+	}
+	_, err := ToIR(cfg)
+	if err == nil {
+		t.Fatal("expected error for nested-object parameter")
+	}
+	if !strings.Contains(err.Error(), "nested object") {
+		t.Errorf("err = %v, want mentions nested object", err)
+	}
+}
+
+func TestToIR_OpenAPIMissingOperationRejected(t *testing.T) {
+	t.Parallel()
+
+	fixture := filepath.Join("testdata", "hcl", "bad", "openapi_missing_operation.hcl")
+	cfg, diags := Decode(fixture)
+	if diags.HasErrors() {
+		t.Fatalf("decode: %s", diags.Error())
+	}
+	_, err := ToIR(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing operationId")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("err = %v, want mentions 'not found'", err)
 	}
 }
 
