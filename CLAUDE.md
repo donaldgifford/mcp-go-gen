@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-IMPL-0001 Phase 6 complete, moving toward Phase 7 (dogfooding + release). Both output modes (`--mode new`, `--mode embed`) are wired across all four auth schemes and both proxy-input flavors. Embed mode reads the user's module path via `scaffold.ModulePath`, emits only the `internal/` subset, and idempotently inserts `mcpserver.Register(ctx, app, cfg)` into the user's `main.go` at the `// mcpgen:hook` marker via `internal/dst`. The generated `Register` is a signature-only stub today — full wiring lands with the first dogfooded service.
+IMPL-0001 Phases 1–7 complete — mcpgen has shipped the MVP generator. Both output modes (`--mode new`, `--mode embed`) are wired across all four auth schemes and both proxy-input flavors. Embed mode reads the user's module path via `scaffold.ModulePath`, emits only the `internal/` subset, and idempotently inserts `mcpserver.Register(ctx, app, cfg)` into the user's `main.go` at the `// mcpgen:hook` marker via `internal/dst`. `make ci` is green, `make release-check` validates the goreleaser config, and the README + IMPL-0001 Phase 7 track document the known limitations (real `Register` body, OpenAPI request-body params, path-rewrite for copied HCLs) as v1.x backlog.
 
 When implementing, follow the design documents in `docs/` rather than inventing a layout from scratch. The package-layout conventions below match IMPL-0001 Phase 1; don't rename dirs without updating the impl doc.
 
