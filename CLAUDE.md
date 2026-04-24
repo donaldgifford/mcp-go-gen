@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early scaffold. There is no `go.mod` yet and `cmd/mcp-go-gen/main.go` is a package stub. Repo tooling (Makefile, linting, CI, docs system, release automation) is fully wired up; the Go implementation is not yet started. When implementing, follow the design documents in `docs/` rather than inventing a layout from scratch.
+IMPL-0001 Phase 1 in progress — the module is initialized (`go.mod` on Go 1.26.1), the package layout exists (`internal/{cli,config,ir,gen,openapi,dst,scaffold}`), and the Cobra command tree (`init`, `validate`, `generate`) is wired up with flag parsing and a slog JSON logger. All three subcommands currently return `cli.ErrNotImplemented`. Real behavior lands in Phase 2+.
+
+When implementing, follow the design documents in `docs/` rather than inventing a layout from scratch. The package-layout conventions below match IMPL-0001 Phase 1; don't rename dirs without updating the impl doc.
 
 ## What this project is
 
@@ -44,7 +46,9 @@ Running a single Go test within a package: `go test -v -race -run TestName ./pat
 
 ## Repo layout
 
-- `cmd/mcp-go-gen/` — binary entry point.
+- `cmd/mcp-go-gen/` — binary entry point; only owns `main.main()` and the `version`/`commit` ldflag variables. All real work lives under `internal/`.
+- `internal/cli/` — Cobra command tree (`root`, `init`, `validate`, `generate`), slog logger wiring, and the `ErrNotImplemented` sentinel for stubbed subcommands. Subcommands retrieve the logger via `loggerFrom(cmd.Context())`.
+- `internal/config/`, `internal/ir/`, `internal/gen/`, `internal/openapi/`, `internal/dst/`, `internal/scaffold/` — placeholder packages with `doc.go`; implementations land in the phase called out in each file's comment.
 - `docs/` — managed by [docz](https://github.com/donaldgifford/docz). Subdirs: `adr/`, `rfc/`, `design/`, `impl/`, `plan/`, `investigation/`. Each has a `README.md` index that is regenerated automatically. Configuration in `.docz.yaml`. Don't edit the index tables by hand — use `docz update` (or the `docz:update` skill).
 - `docs/building-mcpgen.md` / `docs/using-mcpgen.md` — long-form walkthroughs that predate the docz structure; they are canonical reference material for the HCL schema, template shape, DST edit strategy, and generated layout.
 - `.github/workflows/` — CI (lint, test, build, security scan with govulncheck + Trivy, docker bake), license check, PR labeler, release.

@@ -93,12 +93,12 @@ Bring the scaffold from "no Go code" to "builds a binary with a working command 
 - [x] Run `go mod init github.com/donaldgifford/mcp-go-gen` and commit `go.mod` / `go.sum`.
 - [x] Fix `.goreleaser.yml`: replace `id: forge`, `binary: forge`, `main: ./cmd/forge`, and the `release.github.name: forge` fields with `mcp-go-gen` equivalents so snapshot builds target the real binary.
 - [x] Fix the `run` target in `Makefile` — it currently points at `./build/bin/repo-guardian`; change to `$(BIN_DIR)/$(PROJECT_NAME)`.
-- [ ] Create the package layout: `cmd/mcp-go-gen/`, `internal/cli/`, `internal/config/`, `internal/ir/`, `internal/gen/`, `internal/gen/templates/`, `internal/openapi/`, `internal/dst/`, `internal/scaffold/`.
-- [ ] Wire `cmd/mcp-go-gen/main.go` to `internal/cli.Execute()` and pass `version`/`commit` ldflag vars through.
-- [ ] Build the Cobra command tree with three commands — `init`, `validate`, `generate` — using `cobra-cli` (already in `mise.toml`). Each command lands in its own file under `internal/cli/` and returns `errNotImplemented` for now.
-- [ ] Add persistent `--verbose` and per-command flags from DESIGN-0004 §"CLI Surface" (`--config`, `--mode`, `--out`, `--force`, `--dry-run`).
-- [ ] Wire a slog JSON logger to stderr (controlled by `--verbose`); the generator's own logs must never pollute stdout used by `--dry-run`.
-- [ ] Add unit tests for flag parsing, default values, and mutually exclusive combinations (`--dry-run` + `--force` is allowed; unknown `--mode` rejected).
+- [x] Create the package layout: `cmd/mcp-go-gen/`, `internal/cli/`, `internal/config/`, `internal/ir/`, `internal/gen/`, `internal/gen/templates/`, `internal/openapi/`, `internal/dst/`, `internal/scaffold/`.
+- [x] Wire `cmd/mcp-go-gen/main.go` to `internal/cli.Execute()` and pass `version`/`commit` ldflag vars through.
+- [x] Build the Cobra command tree with three commands — `init`, `validate`, `generate` — using `cobra-cli` (already in `mise.toml`). Each command lands in its own file under `internal/cli/` and returns `errNotImplemented` for now.
+- [x] Add persistent `--verbose` and per-command flags from DESIGN-0004 §"CLI Surface" (`--config`, `--mode`, `--out`, `--force`, `--dry-run`).
+- [x] Wire a slog JSON logger to stderr (controlled by `--verbose`); the generator's own logs must never pollute stdout used by `--dry-run`.
+- [x] Add unit tests for flag parsing, default values, and mutually exclusive combinations (`--dry-run` + `--force` is allowed; unknown `--mode` rejected).
 - [ ] Confirm `make lint`, `make test`, and `make build` all pass on the skeleton.
 - [ ] Add a stub `docker-bake.hcl` at the repo root with a `ci` target that builds the `mcp-go-gen` binary, so the existing `.github/workflows/ci.yml:docker-build` job stops referencing a missing file. Full image hardening lands in Phase 7; this stub only needs to build and exit 0.
 - [ ] Fix the stale path reference `docs/guide/mcp-server-in-go.md` in ADR-0001 (References + §Context) and DESIGN-0004 (Background + §Observability + References) — the file lives at `docs/mcp-server-in-go.md`. Either move the file to `docs/guide/` or rewrite the references; keep whichever choice matches what `docs/using-mcpgen.md` and `docs/building-mcpgen.md` expect.
