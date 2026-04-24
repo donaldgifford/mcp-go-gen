@@ -33,3 +33,7 @@ go.work.sum
 
 # Build directories
 build/
+
+# Donald-loop / Ralph-loop local state (never committed)
+.claude/donald-loop.local.md
+.claude/ralph-loop.local.md
