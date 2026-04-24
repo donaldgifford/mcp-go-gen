@@ -91,8 +91,8 @@ Bring the scaffold from "no Go code" to "builds a binary with a working command 
 #### Tasks
 
 - [x] Run `go mod init github.com/donaldgifford/mcp-go-gen` and commit `go.mod` / `go.sum`.
-- [ ] Fix `.goreleaser.yml`: replace `id: forge`, `binary: forge`, `main: ./cmd/forge`, and the `release.github.name: forge` fields with `mcp-go-gen` equivalents so snapshot builds target the real binary.
-- [ ] Fix the `run` target in `Makefile` — it currently points at `./build/bin/repo-guardian`; change to `$(BIN_DIR)/$(PROJECT_NAME)`.
+- [x] Fix `.goreleaser.yml`: replace `id: forge`, `binary: forge`, `main: ./cmd/forge`, and the `release.github.name: forge` fields with `mcp-go-gen` equivalents so snapshot builds target the real binary.
+- [x] Fix the `run` target in `Makefile` — it currently points at `./build/bin/repo-guardian`; change to `$(BIN_DIR)/$(PROJECT_NAME)`.
 - [ ] Create the package layout: `cmd/mcp-go-gen/`, `internal/cli/`, `internal/config/`, `internal/ir/`, `internal/gen/`, `internal/gen/templates/`, `internal/openapi/`, `internal/dst/`, `internal/scaffold/`.
 - [ ] Wire `cmd/mcp-go-gen/main.go` to `internal/cli.Execute()` and pass `version`/`commit` ldflag vars through.
 - [ ] Build the Cobra command tree with three commands — `init`, `validate`, `generate` — using `cobra-cli` (already in `mise.toml`). Each command lands in its own file under `internal/cli/` and returns `errNotImplemented` for now.
