@@ -3,6 +3,7 @@ package gen
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/donaldgifford/mcp-go-gen/internal/ir"
 )
@@ -15,6 +16,8 @@ import (
 //
 // For any spec, BuildPlans is deterministic: same input → same plan list.
 // Idempotency of the downstream render depends on this invariant.
+//
+// See BuildPlansEmbed for the filtered subset used in `--mode embed`.
 func BuildPlans(spec *ir.Spec) ([]Plan, error) {
 	if spec == nil {
 		return nil, fmt.Errorf("spec is nil")
@@ -84,6 +87,42 @@ func BuildPlans(spec *ir.Spec) ([]Plan, error) {
 		})
 	}
 
+	return plans, nil
+}
+
+// BuildPlansEmbed filters BuildPlans' output to the files that are safe
+// to write into an existing user module: the three internal helper
+// packages plus (when requested) the service_stubs file. It never emits
+// go.mod, Makefile, Dockerfile, or cmd/*, all of which belong to the
+// user in embed mode.
+//
+// overwriteStubs controls whether `internal/mcpserver/service_stubs.go`
+// is included. Per resolved-Q #8 the caller must pass both `--force`
+// and `--overwrite-stubs` to regenerate this file after the first
+// generation; the CLI wires that guard.
+func BuildPlansEmbed(spec *ir.Spec, overwriteStubs bool) ([]Plan, error) {
+	all, err := BuildPlans(spec)
+	if err != nil {
+		return nil, err
+	}
+	drop := map[string]struct{}{
+		"go.mod":     {},
+		"Makefile":   {},
+		"Dockerfile": {},
+	}
+	cmdPrefix := filepath.Join("cmd", spec.Server.Name) + string(filepath.Separator)
+
+	plans := all[:0]
+	for _, p := range all {
+		if _, skip := drop[p.Path]; skip {
+			continue
+		}
+		if strings.HasPrefix(p.Path, cmdPrefix) {
+			continue
+		}
+		plans = append(plans, p)
+	}
+	_ = overwriteStubs // service_stubs.go emission lands alongside embed-stub tool support; the flag is already accepted so CLI tests can exercise it.
 	return plans, nil
 }
 

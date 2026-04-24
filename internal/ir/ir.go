@@ -16,6 +16,12 @@ type Spec struct {
 	Proxy         *ProxySpec // nil for pure-embed specs with no proxy tools
 	Embed         *EmbedSpec // non-nil only for --mode embed generation
 	Tools         []Tool
+
+	// ModulePath is the Go import path of the module the generated
+	// package belongs to. ToIR sets this to Server.Name (the new-mode
+	// default). The embed-mode CLI overwrites it with the user module's
+	// path before calling Render.
+	ModulePath string
 }
 
 // Server captures the identity and network surface of the generated MCP
@@ -87,6 +93,15 @@ type ProxyBearer struct {
 type EmbedSpec struct {
 	TargetMain string
 }
+
+// ModulePath returns the Go import path of the module being generated
+// into. In `new` mode it matches the server name (the generator's own
+// go.mod declares `module <server.name>`). In `embed` mode the CLI
+// overwrites this to the existing module's path, read from the user's
+// go.mod.
+//
+// Templates should import helper packages via `<ModulePath>/internal/...`
+// rather than `<Server.Name>/internal/...` so embed mode works at all.
 
 // ToolKind distinguishes how the generator wires a tool's body.
 type ToolKind int

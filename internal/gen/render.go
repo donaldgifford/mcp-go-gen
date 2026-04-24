@@ -36,7 +36,14 @@ func Render(spec *ir.Spec, w Writer) error {
 	if err != nil {
 		return fmt.Errorf("build plans: %w", err)
 	}
+	return RenderPlans(plans, w)
+}
 
+// RenderPlans executes a caller-supplied plan list. Shares the
+// atomic-write semantics of Render: nothing lands on disk until every
+// buffer renders cleanly. Used by embed mode to render the filtered
+// subset produced by BuildPlansEmbed.
+func RenderPlans(plans []Plan, w Writer) error {
 	tmpls, err := loadTemplates()
 	if err != nil {
 		return fmt.Errorf("load templates: %w", err)

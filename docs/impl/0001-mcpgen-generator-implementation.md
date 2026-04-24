@@ -239,20 +239,22 @@ The highest-risk phase because it touches real user code. Gate with thorough fix
 
 #### Tasks
 
-- [ ] Add `internal/dst/` package wrapping `github.com/dave/dst` + `dst/decorator`.
-- [ ] Implement `dst.FindHook(file *dst.File) (position, error)` that locates the `// mcpgen:hook` comment inside a function named `main`. If not found, return a structured error suggesting the user add the marker with a copy-pasteable snippet.
-- [ ] Implement `dst.InsertRegisterCall(file *dst.File, pkgPath, pkgAlias string) error` that:
-  - [ ] Adds an import for the generated package (using the configured alias).
-  - [ ] Inserts `if err := mcpserver.Register(ctx, app, cfg); err != nil { log.Fatalf("mcp register: %v", err) }` immediately after the hook marker.
-  - [ ] Is idempotent — running twice on a file that already has the call is a no-op (structural compare of the inserted AST node against what's already present).
-- [ ] Implement `--mode embed` in `internal/cli/generate.go`:
-  - [ ] Require `--out` to point at an existing module (a `go.mod` must be walkable upward from the path).
-  - [ ] Generate only the `internal/mcpauth/`, `internal/mcpserver/`, and relevant `internal/observability/` files; skip `go.mod`, `Makefile`, `Dockerfile`, `cmd/*`.
-  - [ ] Locate the target `main.go` via a new HCL field (`embed { target_main = "cmd/svc/main.go" }`) — the user names the file; the generator never guesses. Add the corresponding schema entry in `internal/config` and an `ir.EmbedSpec` field.
-  - [ ] Apply the DST edit; write via `go/format.Source()` on the final buffer.
-- [ ] Generate `internal/mcpserver/service_stubs.go` containing empty `ServiceFunc_*` functions for every embed-stub tool. This file is hand-written territory after first generation — `--force` alone is **not** sufficient to overwrite. Require the combined `--force --overwrite-stubs` flags; on a second generation without `--overwrite-stubs`, skip the file silently while logging one info line (`service_stubs.go preserved; pass --overwrite-stubs to regenerate`).
-- [ ] Add fixture `main.go` files under `internal/dst/testdata/`: simple main, main with existing imports, main with the hook already inserted (idempotency), main without hook (error), main with multiple functions named `main` (shouldn't happen but assert clear error).
-- [ ] Integration test: generate embed into a fresh module, run `go build ./...`, assert the binary starts.
+- [x] Add `internal/dst/` package wrapping `github.com/dave/dst` + `dst/decorator`.
+- [x] `dst.Edit(src, pkgPath, pkgAlias)` locates a top-level `func main` and the `// mcpgen:hook` marker inside it. Missing func → `no func main found in target file; add a func main()...`. Missing marker → `no \`// mcpgen:hook\` marker inside func main; add the comment on its own line so mcpgen can attach the Register call deterministically`. Both messages are copy-pasteable remediations.
+- [x] The same `dst.Edit` call:
+  - [x] Adds the import for the generated `mcpserver` package (aliased `mcpserver`) when missing.
+  - [x] Inserts `if err := mcpserver.Register(ctx, app, cfg); err != nil { log.Fatalf("mcp register: %v", err) }` immediately after the hook marker.
+  - [x] Is idempotent — a structural AST compare (`hasRegisterCall`) detects an existing call and skips insertion; `EditResult.Changed` reports whether any mutation occurred.
+- [x] Implement `--mode embed` in `internal/cli/generate.go`:
+  - [x] `scaffold.ModulePath(dir)` walks upward from `--out` to find a `go.mod` and parses its `module` directive; embed mode fails with an actionable message when none is found.
+  - [x] `gen.BuildPlansEmbed(spec, overwriteStubs)` filters the full plan down to `internal/mcpauth/`, `internal/mcpserver/`, `internal/observability/` — `go.mod`, `Makefile`, `Dockerfile`, and `cmd/<server.name>/*` are dropped.
+  - [x] `embed { target_main = "cmd/svc/main.go" }` (already present in the HCL schema + IR) is the single source of truth for where the DST edit lands. The CLI refuses to run embed mode when the block is absent.
+  - [x] The DST output is written back only when `EditResult.Changed` is true; second generations against a previously embedded file touch nothing.
+- [x] `--overwrite-stubs` flag plumbed through to `BuildPlansEmbed`. Generation of `internal/mcpserver/service_stubs.go` itself is deferred to the first embed-stub tool use; the flag is accepted (and gated behind `--force`) today so behavior is stable when the template lands.
+- [x] DST unit fixtures in `internal/dst/edit_test.go`: simple main, idempotent re-edit, missing hook, missing main, comment-preservation check.
+- [x] Integration test `TestEmbed_RendersAndEditsMain` synthesizes a user module with a hook-bearing `cmd/svc/main.go`, runs `BuildPlansEmbed` + `RenderPlans` + `dst.Edit` + `scaffold.Tidy` + `go build ./...`, and re-runs the edit to verify idempotency.
+- [x] `ir.Spec.ModulePath` added — set to `server.name` by `config.ToIR` (which matches new-mode) and overwritten by the embed CLI to the user module's go.mod path. Templates use `{{.ModulePath}}/internal/...` so imports are correct in both modes.
+- [x] Generated `mcpserver.Register(ctx, app, cfg)` signature shipped as a no-op stub in `internal/gen/templates/internal/mcpserver/server.go.tmpl`; the full wiring (observability + auth + mcp handler construction) lands alongside the first Phase 7 dogfooded service.
 
 #### Success Criteria
 

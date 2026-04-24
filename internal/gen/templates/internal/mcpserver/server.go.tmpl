@@ -2,7 +2,9 @@
 package mcpserver
 
 import (
-	"{{.Server.Name}}/internal/observability"
+	"context"
+
+	"{{.ModulePath}}/internal/observability"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -45,4 +47,20 @@ func New(m *observability.Metrics, tracer observability.Tracer{{if .Proxy}}, bac
 	{{end}}
 
 	return &Server{Core: core, Tools: tools, Metrics: m}
+}
+
+// Register is the embed-mode entry point. Generated mcp-go-gen output
+// inserts `mcpserver.Register(ctx, app, cfg)` at the `// mcpgen:hook`
+// marker in the user's main.go; this function is responsible for
+// instantiating observability + auth + the MCP server and mounting it
+// wherever the user expects.
+//
+// Phase 6 ships a no-op stub — the real body is filled in as part of
+// the first dogfooded embed service (Phase 7). The signature is fixed
+// so the DST edit is stable across mcpgen versions.
+func Register(ctx context.Context, app, cfg any) error {
+	_ = ctx
+	_ = app
+	_ = cfg
+	return nil
 }

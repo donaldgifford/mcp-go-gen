@@ -54,6 +54,7 @@ func ToIR(cfg *Config) (*ir.Spec, error) {
 	spec := &ir.Spec{
 		Server:        convertServer(&cfg.Server),
 		Observability: convertObservability(cfg.Server.Observability),
+		ModulePath:    cfg.Server.Name,
 	}
 
 	auth, authErr := convertAuth(cfg.Server.Auth)

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/donaldgifford/mcp-go-gen/internal/config"
+	mcpdst "github.com/donaldgifford/mcp-go-gen/internal/dst"
 	"github.com/donaldgifford/mcp-go-gen/internal/gen"
 	"github.com/donaldgifford/mcp-go-gen/internal/ir"
 	"github.com/donaldgifford/mcp-go-gen/internal/scaffold"
@@ -22,11 +23,12 @@ const (
 // generateOptions holds the parsed flags for the generate subcommand.
 // Broken out so flag parsing can be tested in isolation from Cobra.
 type generateOptions struct {
-	config string
-	mode   string
-	out    string
-	force  bool
-	dryRun bool
+	config         string
+	mode           string
+	out            string
+	force          bool
+	dryRun         bool
+	overwriteStubs bool
 }
 
 func (o *generateOptions) validate() error {
@@ -69,6 +71,9 @@ func newGenerateCmd() *cobra.Command {
 		"overwrite existing files in --out")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false,
 		"print planned writes to stdout without touching disk")
+	cmd.Flags().BoolVar(&opts.overwriteStubs, "overwrite-stubs", false,
+		"in --mode embed: also regenerate internal/mcpserver/service_stubs.go "+
+			"(requires --force)")
 
 	return cmd
 }
@@ -81,11 +86,8 @@ func runGenerate(cmd *cobra.Command, opts *generateOptions) error {
 		"out", opts.out,
 		"force", opts.force,
 		"dry_run", opts.dryRun,
+		"overwrite_stubs", opts.overwriteStubs,
 	)
-
-	if opts.mode == ModeEmbed {
-		return fmt.Errorf("--mode embed: %w", ErrNotImplemented)
-	}
 
 	cfg, diags := config.Decode(opts.config)
 	if diags.HasErrors() {
@@ -103,29 +105,91 @@ func runGenerate(cmd *cobra.Command, opts *generateOptions) error {
 		}
 	}
 
-	writer := resolveWriter(cmd, opts)
+	switch opts.mode {
+	case ModeNew:
+		return runGenerateNew(cmd, opts, spec)
+	case ModeEmbed:
+		return runGenerateEmbed(cmd, opts, spec)
+	default:
+		return fmt.Errorf("--mode must be one of [%s, %s], got %q", ModeNew, ModeEmbed, opts.mode)
+	}
+}
 
+func runGenerateNew(cmd *cobra.Command, opts *generateOptions, spec *ir.Spec) error {
+	writer := resolveWriter(cmd, opts)
 	if err := gen.Render(spec, writer); err != nil {
 		return fmt.Errorf("render: %w", err)
 	}
+	if opts.dryRun {
+		return nil
+	}
+	if err := copyHCL(opts.config, opts.out); err != nil {
+		return fmt.Errorf("copy spec: %w", err)
+	}
+	if err := scaffold.Tidy(cmd.Context(), opts.out, cmd.ErrOrStderr()); err != nil {
+		return fmt.Errorf("tidy: %w", err)
+	}
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "generated %s → %s\n", opts.config, opts.out); err != nil {
+		return fmt.Errorf("stdout: %w", err)
+	}
+	return nil
+}
 
+func runGenerateEmbed(cmd *cobra.Command, opts *generateOptions, spec *ir.Spec) error {
+	if spec.Embed == nil || spec.Embed.TargetMain == "" {
+		return fmt.Errorf("--mode embed requires an `embed { target_main = ... }` block in the HCL spec")
+	}
+	if opts.overwriteStubs && !opts.force {
+		return fmt.Errorf("--overwrite-stubs requires --force (safety: service_stubs.go is hand-written territory)")
+	}
+
+	modulePath, err := scaffold.ModulePath(opts.out)
+	if err != nil {
+		return fmt.Errorf("detect module path: %w", err)
+	}
+	spec.ModulePath = modulePath
+
+	plans, err := gen.BuildPlansEmbed(spec, opts.overwriteStubs)
+	if err != nil {
+		return fmt.Errorf("build embed plans: %w", err)
+	}
+	writer := resolveWriter(cmd, opts)
+	if err := gen.RenderPlans(plans, writer); err != nil {
+		return fmt.Errorf("render: %w", err)
+	}
 	if opts.dryRun {
 		return nil
 	}
 
-	// Copy source HCL into the generated project root verbatim.
-	if err := copyHCL(opts.config, opts.out); err != nil {
-		return fmt.Errorf("copy spec: %w", err)
+	targetMain := filepath.Join(opts.out, spec.Embed.TargetMain)
+	if err := applyDSTEdit(targetMain, modulePath); err != nil {
+		return fmt.Errorf("dst edit %s: %w", targetMain, err)
 	}
 
-	// Tidy the generated module so its go.sum is populated and the tree
-	// is immediately buildable.
-	if err := scaffold.Tidy(cmd.Context(), opts.out, cmd.ErrOrStderr()); err != nil {
-		return fmt.Errorf("tidy: %w", err)
-	}
-
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "generated %s → %s\n", opts.config, opts.out); err != nil {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "embedded into %s (module %s)\n", opts.out, modulePath); err != nil {
 		return fmt.Errorf("stdout: %w", err)
+	}
+	return nil
+}
+
+// applyDSTEdit reads the user's main.go, applies the idempotent mcpgen
+// Register insertion, and writes the result back only when something
+// changed. An unchanged file means both the import and the call are
+// already present — no-op second generations are silent.
+func applyDSTEdit(path, modulePath string) error {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	res, err := mcpdst.Edit(src, modulePath+"/internal/mcpserver", "mcpserver")
+	if err != nil {
+		return err
+	}
+	if !res.Changed {
+		return nil
+	}
+	if err := os.WriteFile(path, res.Source, 0o644); err != nil { //nolint:gosec // preserving the user file's address; perms inherited by intent
+		return fmt.Errorf("write: %w", err)
 	}
 	return nil
 }
