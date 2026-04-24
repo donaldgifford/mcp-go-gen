@@ -100,7 +100,7 @@ Bring the scaffold from "no Go code" to "builds a binary with a working command 
 - [x] Wire a slog JSON logger to stderr (controlled by `--verbose`); the generator's own logs must never pollute stdout used by `--dry-run`.
 - [x] Add unit tests for flag parsing, default values, and mutually exclusive combinations (`--dry-run` + `--force` is allowed; unknown `--mode` rejected).
 - [ ] Confirm `make lint`, `make test`, and `make build` all pass on the skeleton.
-- [ ] Add a stub `docker-bake.hcl` at the repo root with a `ci` target that builds the `mcp-go-gen` binary, so the existing `.github/workflows/ci.yml:docker-build` job stops referencing a missing file. Full image hardening lands in Phase 7; this stub only needs to build and exit 0.
+- [x] Add a stub `docker-bake.hcl` at the repo root with a `ci` target that builds the `mcp-go-gen` binary, so the existing `.github/workflows/ci.yml:docker-build` job stops referencing a missing file. Full image hardening lands in Phase 7; this stub only needs to build and exit 0.
 - [ ] Fix the stale path reference `docs/guide/mcp-server-in-go.md` in ADR-0001 (References + §Context) and DESIGN-0004 (Background + §Observability + References) — the file lives at `docs/mcp-server-in-go.md`. Either move the file to `docs/guide/` or rewrite the references; keep whichever choice matches what `docs/using-mcpgen.md` and `docs/building-mcpgen.md` expect.
 
 #### Success Criteria
