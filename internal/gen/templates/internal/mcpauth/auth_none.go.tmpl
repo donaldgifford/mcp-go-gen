@@ -1,0 +1,55 @@
+{{/* auth_none: no authentication. Every request flows through unchallenged
+     and is tagged with an anonymous Subject so tool handlers never need
+     to branch on auth mode. */}}
+// WARNING: no authentication is configured for this MCP server. Every
+// request succeeds as an anonymous subject. Do not deploy this binary to
+// a network reachable from untrusted clients without an external
+// authentication layer.
+package mcpauth
+
+import (
+	"context"
+	"net/http"
+)
+
+// Subject is the identity attached to context by the auth middleware. Tool
+// handlers use SubjectFromContext to read it. The type stays identical
+// across auth schemes so handler code does not fork.
+type Subject struct {
+	Name string
+}
+
+type subjectKey struct{}
+
+// SubjectFromContext returns the subject previously stored by the auth
+// middleware, or an anonymous subject if none is present.
+func SubjectFromContext(ctx context.Context) (Subject, bool) {
+	s, ok := ctx.Value(subjectKey{}).(Subject)
+	return s, ok
+}
+
+// ContextWithSubject stores s on ctx.
+func ContextWithSubject(ctx context.Context, s Subject) context.Context {
+	return context.WithValue(ctx, subjectKey{}, s)
+}
+
+// Middleware is the auth http.Handler wrapper. The none variant performs
+// no authentication; OnFailure is present only for API parity and never
+// fires.
+type Middleware struct {
+	OnFailure func(reason string)
+}
+
+// NewMiddleware returns the no-auth middleware. Never errors.
+func NewMiddleware(ctx context.Context) (*Middleware, error) {
+	_ = ctx
+	return &Middleware{}, nil
+}
+
+// Wrap tags every request with an anonymous subject and passes through.
+func (m *Middleware) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := ContextWithSubject(r.Context(), Subject{Name: "anonymous"})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}

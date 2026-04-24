@@ -9,6 +9,7 @@ import (
 
 	"github.com/donaldgifford/mcp-go-gen/internal/config"
 	"github.com/donaldgifford/mcp-go-gen/internal/gen"
+	"github.com/donaldgifford/mcp-go-gen/internal/ir"
 	"github.com/donaldgifford/mcp-go-gen/internal/scaffold"
 )
 
@@ -93,6 +94,13 @@ func runGenerate(cmd *cobra.Command, opts *generateOptions) error {
 	spec, err := config.ToIR(cfg)
 	if err != nil {
 		return fmt.Errorf("validate %s: %w", opts.config, err)
+	}
+
+	if _, ok := spec.Auth.(ir.AuthNone); ok {
+		if _, werr := fmt.Fprintln(cmd.ErrOrStderr(),
+			"warning: auth { none {} } — generated server will not authenticate requests"); werr != nil {
+			return fmt.Errorf("stderr: %w", werr)
+		}
 	}
 
 	writer := resolveWriter(cmd, opts)

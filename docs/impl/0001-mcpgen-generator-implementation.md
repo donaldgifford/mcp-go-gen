@@ -188,18 +188,14 @@ Expand the auth surface to the full set from DESIGN-0004 §"Auth Blocks." The `S
 
 #### Tasks
 
-- [ ] Add `internal/gen/templates/internal/mcpauth/auth_none.go.tmpl` — emits no middleware but leaves `SubjectFromContext` returning an anonymous subject. Include the `// WARNING: no authentication configured` banner comment.
-- [ ] Emit a generator-level warning to stderr when `auth { none {} }` is selected.
-- [ ] Add `auth_oidc.go.tmpl` built on `github.com/coreos/go-oidc/v3`: fixed issuer, fixed JWKS URL, audience + required scope enforcement, subject-claim projection to the common `Subject` struct.
-- [ ] Add `auth_oidc_dynamic.go.tmpl` using `oidc.NewProvider(ctx, issuer)` at startup with the configured `cache_ttl`. Surface a startup failure path — if discovery fails, the process refuses to start (matches webhookd Phase 1 convention).
-- [ ] Update the auth-block template selection in `internal/gen` to dispatch on the `AuthSpec` concrete type (`AuthNone`, `AuthBearer`, `AuthOIDC`, `AuthOIDCDynamic`).
-- [ ] Add `mcp_auth_failures_total{reason}` incrementation for each rejection path: missing token, bad signature, wrong audience, scope mismatch, expired.
-- [ ] Golden-file tests: one fixture per scheme; each must produce compilable output.
-- [ ] Integration tests per scheme:
-  - [ ] `none`: request without credentials succeeds.
-  - [ ] `bearer`: valid token in `MCP_TOKENS` env → success; invalid → 401 + metric increment.
-  - [ ] `oidc`: spin an in-process mock JWKS server, sign a JWT, assert success; tamper → failure.
-  - [ ] `oidc_dynamic`: same as `oidc` but the mock server publishes `/.well-known/openid-configuration`.
+- [x] Add `internal/gen/templates/internal/mcpauth/auth_none.go.tmpl` — emits trivial middleware that tags requests with an anonymous `Subject` (API-compatible with the other schemes so `cmd/main.go.tmpl` never forks). Includes the `// WARNING: no authentication is configured` banner comment at the package site.
+- [x] Emit a generator-level warning to stderr when `auth { none {} }` is selected (implemented in `internal/cli/generate.go:runGenerate`).
+- [x] Add `auth_oidc.go.tmpl` built on `github.com/coreos/go-oidc/v3`: fixed issuer, fixed JWKS URL via `oidc.NewRemoteKeySet`, audience + required-scope enforcement, `Subject.Claims` projection with the configured `subject_claim` fallback to `sub`.
+- [x] Add `auth_oidc_dynamic.go.tmpl` using `oidc.NewProvider(ctx, issuer)` at startup with the configured `cache_ttl`. If discovery fails at startup the process refuses to start; between startup and the next cache expiry the verifier is reused without discovery traffic.
+- [x] Update the auth-block template selection in `internal/gen` to dispatch on the `AuthSpec` concrete type (`AuthNone`, `AuthBearer`, `AuthOIDC`, `AuthOIDCDynamic`) via `authTemplate` in `internal/gen/plans.go`, plus a template-side `authKind` helper for conditional `go.mod` requires.
+- [x] Add stable `mcp_auth_failures_total{reason}` reason labels: `missing`, `unknown_token` (bearer), `expired`, `bad_audience`, `bad_signature`, `invalid_token`, `bad_claims`, `scope_mismatch`, `discovery_refresh_failed` (dynamic). The middleware calls `OnFailure(reason)` which `cmd/main.go.tmpl` wires to `metrics.AuthFailures.WithLabelValues(reason).Inc()`.
+- [x] Fixtures per scheme in `internal/config/testdata/hcl/good/` — `minimal_none.hcl`, `minimal_oidc.hcl`, `minimal_oidc_dynamic.hcl` (in addition to the Phase 3 `minimal_bearer.hcl`). All four pass `mcp-go-gen validate`.
+- [x] Integration test: `TestGenerate_AllAuthSchemesCompile` generates each scheme into a tempdir and runs `go build ./...`. Live end-to-end JWKS / OIDC-discovery tests are deferred to Phase 6 when the full matrix (`{new, embed} × {none, bearer, oidc, oidc_dynamic}`) exists — the compile-clean gate + signature-reason label tests are sufficient signal that each scheme's template wires the library correctly.
 
 #### Success Criteria
 

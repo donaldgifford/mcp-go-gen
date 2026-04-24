@@ -1,4 +1,4 @@
-{{/* Bearer auth middleware template. Other auth variants land in Phase 4. */}}
+{{/* Bearer auth middleware: static name:token pairs loaded from env. */}}
 package mcpauth
 
 import (
@@ -45,8 +45,11 @@ type Middleware struct {
 }
 
 // NewMiddleware loads tokens from the env var configured at generate time.
-// The expected format is "name1:token1,name2:token2".
-func NewMiddleware() (*Middleware, error) {
+// The expected format is "name1:token1,name2:token2". The ctx argument is
+// accepted for API parity with the other auth schemes (oidc/oidc_dynamic
+// need it for discovery); bearer never reads from it.
+func NewMiddleware(ctx context.Context) (*Middleware, error) {
+	_ = ctx
 	raw := os.Getenv({{printf "%q" .Auth.TokensEnv}})
 	m := &Middleware{tokens: parseTokens(raw)}
 	return m, nil

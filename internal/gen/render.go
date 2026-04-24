@@ -121,6 +121,24 @@ func funcMap() template.FuncMap {
 		"snake":    snakeCase,
 		"joinPath": path.Join,
 		"quotedOr": quotedOr,
+		"authKind": authKind,
+	}
+}
+
+// authKind returns a short string label for the concrete AuthSpec variant.
+// Templates use it to branch on scheme without importing the ir package.
+func authKind(a ir.AuthSpec) string {
+	switch a.(type) {
+	case ir.AuthNone:
+		return "none"
+	case ir.AuthBearer:
+		return "bearer"
+	case ir.AuthOIDC:
+		return "oidc"
+	case ir.AuthOIDCDynamic:
+		return "oidc_dynamic"
+	default:
+		return ""
 	}
 }
 

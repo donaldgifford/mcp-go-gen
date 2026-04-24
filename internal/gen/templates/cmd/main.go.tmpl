@@ -45,7 +45,7 @@ func run() error {
 
 	metrics := observability.NewMetrics()
 
-	authMw, err := mcpauth.NewMiddleware()
+	authMw, err := mcpauth.NewMiddleware(ctx)
 	if err != nil {
 		return err
 	}

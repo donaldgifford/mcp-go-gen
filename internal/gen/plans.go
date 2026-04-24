@@ -22,10 +22,9 @@ func BuildPlans(spec *ir.Spec) ([]Plan, error) {
 	if spec.Server.Name == "" {
 		return nil, fmt.Errorf("spec.Server.Name is empty; cannot generate")
 	}
-	if _, ok := spec.Auth.(ir.AuthBearer); !ok {
-		// Phase 3 MVP: only bearer is wired end to end. Phase 4 fills in
-		// none/oidc/oidc_dynamic variants.
-		return nil, fmt.Errorf("only AuthBearer is supported in this phase; got %T", spec.Auth)
+	authTmpl, err := authTemplate(spec.Auth)
+	if err != nil {
+		return nil, err
 	}
 
 	plans := []Plan{
@@ -58,7 +57,7 @@ func BuildPlans(spec *ir.Spec) ([]Plan, error) {
 		},
 		{
 			Path:     filepath.Join("internal", "mcpauth", "auth.go"),
-			Template: "internal/mcpauth/auth.go.tmpl",
+			Template: authTmpl,
 			Data:     spec,
 			GoFormat: true,
 		},
@@ -86,4 +85,23 @@ func BuildPlans(spec *ir.Spec) ([]Plan, error) {
 	}
 
 	return plans, nil
+}
+
+// authTemplate maps each AuthSpec variant to the template that renders
+// the generated mcpauth package. The sealed-sum-type switch ensures a
+// missing case surfaces as a compile-time warning via exhaustiveness
+// linting (and a clear runtime error if one is added without handling).
+func authTemplate(a ir.AuthSpec) (string, error) {
+	switch a.(type) {
+	case ir.AuthNone:
+		return "internal/mcpauth/auth_none.go.tmpl", nil
+	case ir.AuthBearer:
+		return "internal/mcpauth/auth_bearer.go.tmpl", nil
+	case ir.AuthOIDC:
+		return "internal/mcpauth/auth_oidc.go.tmpl", nil
+	case ir.AuthOIDCDynamic:
+		return "internal/mcpauth/auth_oidc_dynamic.go.tmpl", nil
+	default:
+		return "", fmt.Errorf("unknown auth variant %T", a)
+	}
 }
