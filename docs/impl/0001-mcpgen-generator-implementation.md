@@ -43,7 +43,7 @@ created: 2026-04-24
 - [File Changes](#file-changes)
 - [Testing Plan](#testing-plan)
 - [Dependencies](#dependencies)
-- [Open Questions](#open-questions)
+- [Resolved Open Questions](#resolved-open-questions)
 - [References](#references)
 <!--toc:end-->
 
@@ -58,7 +58,7 @@ Build the `mcpgen` binary described in ADR-0001 and DESIGN-0004: a Go code gener
 ### In Scope
 
 - HCL2 schema version `"1"` decoder and an intermediate representation (IR) that decouples parsing from codegen.
-- `mcpgen init | validate | generate` CLI surface (see DESIGN-0004 §"CLI Surface").
+- `mcp-go-gen init | validate | generate` CLI surface (see DESIGN-0004 §"CLI Surface").
 - `text/template` + `go/format.Source()` pipeline for new files.
 - `github.com/dave/dst` pipeline for the single embed-mode edit to a user's `main.go` at the `// mcpgen:hook` marker.
 - `github.com/pb33f/libopenapi` integration for OpenAPI 3.0/3.1 operation lookup.
@@ -100,13 +100,17 @@ Bring the scaffold from "no Go code" to "builds a binary with a working command 
 - [ ] Wire a slog JSON logger to stderr (controlled by `--verbose`); the generator's own logs must never pollute stdout used by `--dry-run`.
 - [ ] Add unit tests for flag parsing, default values, and mutually exclusive combinations (`--dry-run` + `--force` is allowed; unknown `--mode` rejected).
 - [ ] Confirm `make lint`, `make test`, and `make build` all pass on the skeleton.
+- [ ] Add a stub `docker-bake.hcl` at the repo root with a `ci` target that builds the `mcp-go-gen` binary, so the existing `.github/workflows/ci.yml:docker-build` job stops referencing a missing file. Full image hardening lands in Phase 7; this stub only needs to build and exit 0.
+- [ ] Fix the stale path reference `docs/guide/mcp-server-in-go.md` in ADR-0001 (References + §Context) and DESIGN-0004 (Background + §Observability + References) — the file lives at `docs/mcp-server-in-go.md`. Either move the file to `docs/guide/` or rewrite the references; keep whichever choice matches what `docs/using-mcpgen.md` and `docs/building-mcpgen.md` expect.
 
 #### Success Criteria
 
 - `go build ./...` produces `build/bin/mcp-go-gen`.
 - `./build/bin/mcp-go-gen --help`, `... init --help`, `... validate --help`, `... generate --help` all render correctly and list the flags from DESIGN-0004.
 - `make ci` passes (lint + test + build + license-check) on a branch that contains only Phase 1 work.
+- The CI `docker-build` job succeeds against the stub `docker-bake.hcl`.
 - `.goreleaser.yml` passes `make release-check`.
+- No doc in the repo references `docs/guide/mcp-server-in-go.md` unless that path exists.
 
 ---
 
@@ -120,24 +124,24 @@ Implement the decoder and the IR conversion. This is the layer every later phase
 - [ ] Decode all four auth block variants (`none`, `bearer`, `oidc`, `oidc_dynamic`) and enforce "exactly one" at decode time with a `hcl.Diagnostic` that points at the offending source range.
 - [ ] Define the IR in `internal/ir/` (see DESIGN-0004 §"Intermediate Representation"): `Spec`, `Server`, `Observability`, `ProxySpec`, `Tool`, `Field`, `HTTPBackend`, and the `AuthSpec` sum type with `isAuthSpec()` sealed method.
 - [ ] Build `config.ToIR(*config.Config) (*ir.Spec, error)` with all cross-field validation: duplicate tool names; `openapi_operation` set but no top-level `proxy.openapi.spec`; `backend` block present in `embed`-only contexts; unsupported input types; `mcpgen_version` must equal `"1"` (anything else → clear error with upgrade guidance).
-- [ ] Wire `mcpgen validate <path>` to `config.Decode` + `ir.Validate` and print HCL diagnostics with their source ranges using `hcl.NewDiagnosticTextWriter`.
-- [ ] Wire `mcpgen init` to write a minimal starter `mcpgen.hcl` (proxy + bearer auth + one sample tool). Refuse to overwrite unless `--force`.
+- [ ] Wire `mcp-go-gen validate <path>` to `config.Decode` + `ir.Validate` and print HCL diagnostics with their source ranges using `hcl.NewDiagnosticTextWriter`.
+- [ ] Wire `mcp-go-gen init` to write a minimal starter `mcpgen.hcl` (proxy + bearer auth + one sample tool). Refuse to overwrite unless `--force`.
 - [ ] Unit tests per rule: good-case fixtures under `testdata/hcl/good/*.hcl`, error-case fixtures under `testdata/hcl/bad/*.hcl` with `want_error.txt` golden files for diagnostics.
 - [ ] Add `FuzzHCLDecode` per DESIGN-0004 §"Testing Strategy": decoder must return diagnostics, never panic.
 
 #### Success Criteria
 
-- `mcpgen validate testdata/hcl/good/*.hcl` exits 0 for every good fixture.
-- `mcpgen validate testdata/hcl/bad/*.hcl` exits non-zero for every bad fixture, and stderr matches the corresponding golden diagnostic (byte-identical after range-normalization).
+- `mcp-go-gen validate testdata/hcl/good/*.hcl` exits 0 for every good fixture.
+- `mcp-go-gen validate testdata/hcl/bad/*.hcl` exits non-zero for every bad fixture, and stderr matches the corresponding golden diagnostic (byte-identical after range-normalization).
 - `FuzzHCLDecode` runs for 1 minute in CI without a panic.
-- `mcpgen init` in an empty dir writes a file that `mcpgen validate` accepts.
+- `mcp-go-gen init` in an empty dir writes a file that `mcp-go-gen validate` accepts.
 - Test coverage for `internal/config` and `internal/ir` ≥ 85%.
 
 ---
 
 ### Phase 3: Template Codegen — `new` Mode, Bearer Auth, Inline HTTP Proxy
 
-The minimum-viable generator. At the end of this phase a user can run `mcpgen generate` against a realistic HCL and get a buildable, runnable MCP server. No OpenAPI, no embed mode, no OIDC — just the path that proves the pipeline works end-to-end.
+The minimum-viable generator. At the end of this phase a user can run `mcp-go-gen generate` against a realistic HCL and get a buildable, runnable MCP server. No OpenAPI, no embed mode, no OIDC — just the path that proves the pipeline works end-to-end.
 
 #### Tasks
 
@@ -156,18 +160,21 @@ The minimum-viable generator. At the end of this phase a user can run `mcpgen ge
   - [ ] Run `go/format.Source()` on every `.go` file; fail loud with the original buffer if formatting fails.
   - [ ] Write to disk only after all files render successfully (no partial output on error).
 - [ ] Implement the `gen.Writer` abstraction with two concrete implementations: `FSWriter` (real filesystem with `--force` semantics) and `DryRunWriter` (prints planned actions to stdout).
-- [ ] Implement the tool-handler template per DESIGN-0004 §"Observability in Generated Code": tracer span, subject from context, input parsing, backend call, metrics recording, structured logging with trace correlation.
+- [ ] Implement the tool-handler template per DESIGN-0004 §"Observability in Generated Code": tracer span, subject from context, input parsing, backend call, metrics recording, structured logging with trace correlation. Mirror the skeleton in `docs/mcp-server-in-go.md` §11 (handler template).
 - [ ] Emit the metrics and span names from DESIGN-0004 §"Observability in Generated Code" verbatim (`mcp_tool_invocations_total`, `mcp_tool_duration_seconds`, `mcp_auth_failures_total`, `mcp_backend_requests_total`, `mcp_backend_request_duration_seconds`; spans `mcp.tool.<name>`, `mcp.backend.<name>`).
+- [ ] Implement the `traceHandler` slog wrapper in `internal/gen/templates/internal/observability/logging.go.tmpl` — a ~30-line `slog.Handler` that reads `trace.SpanFromContext(ctx)` and stamps `trace_id` and `span_id` onto each record before delegating. Pattern referenced in `docs/mcp-server-in-go.md` §10.3; the webhookd Phase 1 §4.1 implementation is external and does not need to be imported — crib the behavior from the doc and keep the handler self-contained in generated code.
+- [ ] Generate both a shared-listener and a separate-listener code path for Prometheus metrics, selected at runtime from config: if `observability.metrics.addr` is empty, mount `/metrics` on the same `http.ServeMux` as `/mcp`; if set, start a second `http.Server` on that addr in its own goroutine with the standard signal-handling wiring. Default (when HCL omits `metrics.addr`) is the separate listener — this matches the recommendation in `docs/mcp-server-in-go.md` §7.1.
+- [ ] When `observability.tracing.enabled = false`, generate a `noop.NewTracerProvider()` (from `go.opentelemetry.io/otel/trace/noop`) instead of the OTLP exporter. Imports stay the same; only the provider changes. This keeps the template free of conditional import blocks.
 - [ ] Copy the source `mcpgen.hcl` into the generated project root verbatim (byte-for-byte).
-- [ ] Wire `mcpgen generate --mode new --out <path>` to the full pipeline; enforce `--out` must not exist or must be empty unless `--force`.
-- [ ] After generation, run `go mod tidy` in the output directory unless `--dry-run`. Capture its stderr and surface failures.
+- [ ] Wire `mcp-go-gen generate --mode new --out <path>` to the full pipeline; enforce `--out` must not exist or must be empty unless `--force`.
+- [ ] After generation, run `go mod tidy` in the output directory unless `--dry-run`. Shell out to `go` from `PATH`; if `go` is missing or the output has no `go.mod`, fail loudly with an actionable message. Capture stderr and surface failures.
 - [ ] Golden-file tests under `internal/gen/testdata/golden/`: for each fixture IR, a directory of expected output files, byte-compared. `go test -update` regenerates.
 - [ ] Integration test: generate a bearer+inline-proxy project into `t.TempDir()`, run `go build ./...` in it, assert success.
 - [ ] Regeneration idempotency test: generate twice into the same output dir with `--force`; diff must be empty.
 
 #### Success Criteria
 
-- `mcpgen generate --mode new --out ./demo` produces a compilable Go project given a bearer+inline-proxy `mcpgen.hcl`.
+- `mcp-go-gen generate --mode new --out ./demo` produces a compilable Go project given a bearer+inline-proxy `mcpgen.hcl`.
 - The generated binary starts, serves `/metrics` and `/mcp`, and responds to an MCP `tools/list` over stdio or HTTP (whichever the MCP Go SDK defaults to for the chosen listener).
 - Double-generate produces byte-identical output (idempotency test green).
 - Golden-file tests cover at least three distinct IR shapes.
@@ -219,7 +226,7 @@ Add the second proxy-input flavor: reference operations by `operationId` from an
 - [ ] Golden-file tests: fixture HCL + fixture OpenAPI spec (small, hand-written) → expected generated output.
 - [ ] Integration test: generate against a realistic OpenAPI (e.g., a trimmed Petstore) → compiles and starts.
 - [ ] Error-path tests: missing `operationId`, renamed operation, nested-object parameter, OpenAPI 2.0 document, external-URL `$ref`.
-- [ ] Add the `--allow-missing-operations` flag (deferred from DESIGN-0004 Open Questions) — or explicitly decide not to and move that item to Phase 7's follow-ups list. See open question below.
+  - *Deferred:* `--allow-missing-operations` (tracked in Phase 7 backlog; v1 fails hard on missing operations, which is the stricter default).
 
 #### Success Criteria
 
@@ -245,9 +252,9 @@ The highest-risk phase because it touches real user code. Gate with thorough fix
 - [ ] Implement `--mode embed` in `internal/cli/generate.go`:
   - [ ] Require `--out` to point at an existing module (a `go.mod` must be walkable upward from the path).
   - [ ] Generate only the `internal/mcpauth/`, `internal/mcpserver/`, and relevant `internal/observability/` files; skip `go.mod`, `Makefile`, `Dockerfile`, `cmd/*`.
-  - [ ] Locate the target `main.go` via a new HCL field (`embed { target_main = "cmd/svc/main.go" }`) — the user names the file; the generator never guesses. See open question.
+  - [ ] Locate the target `main.go` via a new HCL field (`embed { target_main = "cmd/svc/main.go" }`) — the user names the file; the generator never guesses. Add the corresponding schema entry in `internal/config` and an `ir.EmbedSpec` field.
   - [ ] Apply the DST edit; write via `go/format.Source()` on the final buffer.
-- [ ] Generate `internal/mcpserver/service_stubs.go` containing empty `ServiceFunc_*` functions for every embed-stub tool; this file is hand-written territory after first generation — never overwrite unless `--force` *and* a user confirmation flag.
+- [ ] Generate `internal/mcpserver/service_stubs.go` containing empty `ServiceFunc_*` functions for every embed-stub tool. This file is hand-written territory after first generation — `--force` alone is **not** sufficient to overwrite. Require the combined `--force --overwrite-stubs` flags; on a second generation without `--overwrite-stubs`, skip the file silently while logging one info line (`service_stubs.go preserved; pass --overwrite-stubs to regenerate`).
 - [ ] Add fixture `main.go` files under `internal/dst/testdata/`: simple main, main with existing imports, main with the hook already inserted (idempotency), main without hook (error), main with multiple functions named `main` (shouldn't happen but assert clear error).
 - [ ] Integration test: generate embed into a fresh module, run `go build ./...`, assert the binary starts.
 
@@ -272,10 +279,18 @@ Ship it. Catch the problems that only show up when a real service goes through t
 - [ ] Audit every generator error message: each must name the HCL source range when applicable and suggest a remediation.
 - [ ] Document the HCL schema end-to-end in `docs/using-mcpgen.md` (already scaffolded) and ensure the examples in `building-mcpgen.md` reflect the final generated output.
 - [ ] Publish the binary via goreleaser. Confirm `.goreleaser.yml` targets `cmd/mcp-go-gen` (fixed in Phase 1) and builds for `linux`/`darwin` × `amd64`/`arm64`.
-- [ ] Add a Dockerfile at the repo root and wire a `docker-bake.hcl` so CI's `docker-build` job has something to build (currently references a file that does not exist).
+- [ ] Add a production Dockerfile at the repo root and flesh out the Phase 1 stub `docker-bake.hcl` with multi-arch targets, a non-root user, and a scratch/distroless runtime base.
 - [ ] Add a Backstage software template that scaffolds an "MCP server" option using mcpgen (rollout week 7).
 - [ ] Populate `README.md` with install/quickstart/link-to-docs (currently a stub).
 - [ ] Cut `v0.1.0` via `make release TAG=v0.1.0`.
+
+**v1.x backlog (tracked here so they do not get lost):**
+
+- [ ] `--allow-missing-operations` flag for `generate` — skip tools whose `openapi_operation` no longer resolves, emit a warning per skip. Useful for CI on evolving specs. Deferred from Phase 5 because the strict default catches real drift.
+- [ ] Per-tool `required_scopes` in HCL (DESIGN-0004 Open Questions) — extends server-level scopes for sensitive tools.
+- [ ] OpenAPI response field selection — `output { select = ["id", "title"] }` to trim responses shown to the LLM.
+- [ ] Auto-pagination for paginated backend endpoints (`auto_paginate = true`).
+- [ ] Amend ADR-0001 §5 — the shipped binary is `mcp-go-gen` (not `mcpgen` as the ADR states). The `mcpgen` brand remains in the config filename (`mcpgen.hcl`) and package internals. File a new ADR superseding §5 or amend in place.
 
 #### Success Criteria
 
@@ -318,7 +333,7 @@ Every path below is relative to the repo root. "Create" means the file does not 
 - **Golden files** — `internal/gen/testdata/golden/<fixture>/` holds the expected directory tree per IR fixture. `go test -update` regenerates. Every template change must regenerate goldens in the same commit.
 - **Fuzz** — `FuzzHCLDecode` on the config parser; runs in CI for 1 minute, locally much longer.
 - **Integration** — the matrix from DESIGN-0004 §"Testing Strategy": `{new, embed} × {none, bearer, oidc, oidc_dynamic} × {proxy-inline, proxy-openapi, embed-stub}`. Each cell:
-  1. `mcpgen generate` into `t.TempDir()`.
+  1. `mcp-go-gen generate` into `t.TempDir()`.
   2. `go build ./...` in the output.
   3. Start the binary on a random port (where applicable).
   4. Connect the MCP Inspector SDK client; assert `tools/list` returns the expected set; call one tool and assert observability metrics increment.
@@ -346,21 +361,21 @@ Every path below is relative to the repo root. "Create" means the file does not 
 
 **Tooling** pinned in `mise.toml`: Go 1.26.1, golangci-lint 2.11.4, goreleaser, mockery, goimports, go-licenses.
 
-## Open Questions
+## Resolved Open Questions
 
-These are implementation-level questions that came up while planning the phases. Answers will change the work in the indicated phase. Each has my current best guess; flag any you want to decide differently before I start.
+The questions raised while planning were reviewed and decided on 2026-04-24. Decisions are reflected in the phase tasks above; this section records the reasoning for future readers.
 
-1. **Module name vs. binary name.** The repo is `mcp-go-gen`, ADR-0001 §5 says "Tool name: `mcpgen`," and the Makefile binary is `$(PROJECT_NAME) = mcp-go-gen`. Should the shipped binary be `mcpgen` (matching the ADR) and the module stay `github.com/donaldgifford/mcp-go-gen`? That's the direction I planned for Phase 1, but confirm before I rename.
-2. **Where does `docs/guide/mcp-server-in-go.md` live?** DESIGN-0004 §"Observability in Generated Code" cites it as the source of the tool-handler pattern, and ADR-0001 references it in its References section, but it is not in this repo. Is it in a sibling repo (`fwsync`? the webhookd tree?), or does it need to be imported into `docs/guide/` as part of Phase 1? Phase 3's template fidelity depends on having that pattern in hand.
-3. **Reference for the slog trace handler.** DESIGN-0004 §"Observability in Generated Code" says the generated code uses "the same `traceHandler` slog wrapper pattern from webhookd Phase 1." Same question — is that code available to crib from, or does mcpgen need to define the handler in its templates from scratch?
-4. **MCP Go SDK pinning.** ADR-0001 names `mark3labs/mcp-go`; DESIGN-0004 uses `mcp.CallToolRequest`, `mcp.NewToolResultStructured`, `req.RequireString`. I need to pin a specific version in the generator templates so that golden files are stable. Which version? (Right now I'd pick "latest as of branch creation" and re-pin at each generator release.)
-5. **`go mod tidy` after generate: in-process or separate?** DESIGN-0004 §"Generated File Layout" notes `go.sum` is "generated via `go mod tidy` at end." Does mcpgen shell out to `go mod tidy` as part of `generate`, fail the run on its error, and require Go in PATH — or does it emit a message telling the user to run it? My current plan is to shell out (with the option to skip via `--no-tidy`); flag if you'd rather it not depend on `go` being present.
-6. **Embed mode: how does the user point at `main.go`?** I planned an HCL `embed { target_main = "cmd/svc/main.go" }` block, but ADR-0001 and DESIGN-0004 don't specify the mechanism — they just say "the designated `main.go`." Alternatives: a CLI flag (`--target-main`), or a convention ("first `cmd/*/main.go` under `--out`"). HCL feels most consistent with "all behavior is driven by the HCL config" from DESIGN-0004 §"CLI Surface"; confirm.
-7. **`--allow-missing-operations` now or later?** DESIGN-0004 lists it under Open Questions, not under the v1 Rollout. I'd defer it to Phase 7's follow-ups rather than build it in Phase 5. OK?
-8. **`service_stubs.go` protection.** For embed mode, the stub file is user-owned after first generation. DESIGN-0004 says mcpgen never overwrites hand-written files. I planned to make `--force` *alone* insufficient for this file — it would need `--force --overwrite-stubs` (or similar) to prevent foot-gun. Is that the right friction, or should `--force` be enough?
-9. **Metrics listener: shared vs. separate.** HCL allows `metrics.addr` to differ from the main listener. The generated code needs to handle both cases (shared mux vs. separate `http.Server`). I'd prefer to always generate the separate-server path and conditionally start it; alternative is two different templates. Opinion?
-10. **OTLP defaults when tracing is disabled.** If `observability.tracing.enabled = false`, should the tracer be a no-op provider (clean, but still imports the OTel packages) or should the import be entirely omitted via template conditionals (smaller binary but template becomes conditional-heavy)? I lean toward no-op provider for simplicity; flag if binary size matters.
-11. **Docker build in CI.** `.github/workflows/ci.yml` has a `docker-build` job that references `docker-bake.hcl`, which does not exist in the repo. Phase 1 will fail that job until I add a stub. Should I add the `docker-bake.hcl` in Phase 1 (to keep CI green) and flesh it out in Phase 7, or disable that job until Phase 7?
+1. **Binary name — `mcp-go-gen`.** The shipped binary matches the repo and module path (`github.com/donaldgifford/mcp-go-gen`). The `mcpgen` name is retained only as a brand — in the config filename (`mcpgen.hcl`), the `// mcpgen:hook` DST marker, and the `Code generated by mcpgen. DO NOT EDIT.` banner. ADR-0001 §5 ("Tool name: mcpgen") is now stale and is tracked in the v1.x backlog for amendment.
+2. **`docs/guide/mcp-server-in-go.md` — file exists at `docs/mcp-server-in-go.md`.** ADR-0001 and DESIGN-0004 reference a path prefix (`docs/guide/`) that does not match where the file landed. Phase 1 fixes this by either moving the file to `docs/guide/` or rewriting the references; implementation tasks downstream assume the patterns documented there are canonical.
+3. **`traceHandler` — implement from the documented contract.** `docs/mcp-server-in-go.md` §10.3 describes the pattern: an `slog.Handler` that reads `trace.SpanFromContext(ctx)` and stamps `trace_id` + `span_id` onto each record before delegating. The webhookd Phase 1 §4.1 reference implementation is external; mcpgen defines its own self-contained ~30-line version in `internal/gen/templates/internal/observability/logging.go.tmpl`.
+4. **MCP Go SDK version — newest at release cut.** Pin `github.com/mark3labs/mcp-go` to the latest stable tag at the time each mcpgen release branches. Golden-file tests must be regenerated alongside any version bump, so the pin moves in a deliberate commit rather than silently via `go get -u`.
+5. **`go mod tidy` — shell out, fail loudly.** `mcp-go-gen generate` invokes `go mod tidy` in the output directory as the last step (skippable with `--dry-run`). If `go` is not in `PATH` or the output directory has no `go.mod` (which for `--mode new` would indicate a generator bug), the run fails with an actionable error naming the missing prerequisite. No silent degradation.
+6. **Embed target `main.go` — HCL `embed { target_main = ... }` block.** Confirmed. Matches DESIGN-0004's "all behavior driven by HCL" principle. Users name the file; the generator never scans `cmd/*`.
+7. **`--allow-missing-operations` — deferred.** Strict failure on missing `operationId` is the v1 default; the flag lands in the v1.x backlog (see Phase 7) once real CI scenarios show the friction.
+8. **`service_stubs.go` — `--force --overwrite-stubs` required.** `--force` alone does not overwrite user-owned stubs. The double-flag requirement prevents an accidental regeneration from wiping hand-written service code. Second generations without `--overwrite-stubs` log one informational line and skip the file.
+9. **Metrics listener — separate by default, shared as an option.** When `observability.metrics.addr` is set, the generator wires a second `http.Server` on that addr (the recommended mode per `docs/mcp-server-in-go.md` §7.1). When `metrics.addr` is omitted, `/metrics` mounts on the same mux as `/mcp`. Both paths live in the same template — config selects at startup, not at generate time.
+10. **OTel when tracing disabled — no-op provider.** Generated code always imports the OTel packages and swaps in `noop.NewTracerProvider()` when `tracing.enabled = false`. Simpler than conditional imports; binary-size cost is acceptable.
+11. **`docker-bake.hcl` — stub in Phase 1.** Added as a Phase 1 task so the existing `docker-build` CI job stops referencing a missing file. Production hardening (multi-arch, non-root, distroless runtime) lands in Phase 7.
 
 ## References
 
