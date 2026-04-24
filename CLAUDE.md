@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-IMPL-0001 Phase 1 in progress — the module is initialized (`go.mod` on Go 1.26.1), the package layout exists (`internal/{cli,config,ir,gen,openapi,dst,scaffold}`), and the Cobra command tree (`init`, `validate`, `generate`) is wired up with flag parsing and a slog JSON logger. All three subcommands currently return `cli.ErrNotImplemented`. Real behavior lands in Phase 2+.
+IMPL-0001 Phase 2 complete, moving toward Phase 3. The module is initialized on Go 1.26.1. The CLI (`mcp-go-gen init | validate | generate`) is live — `init` writes a starter HCL, `validate` decodes and runs full cross-field validation via `config.ToIR`, and `generate` parses flags and returns `ErrNotImplemented` until Phase 3 lands the template renderer. The HCL schema and intermediate representation are implemented; every rule from DESIGN-0004 §"HCL Schema — Top Level" has a fixture-backed test plus a `FuzzHCLDecode` target.
 
 When implementing, follow the design documents in `docs/` rather than inventing a layout from scratch. The package-layout conventions below match IMPL-0001 Phase 1; don't rename dirs without updating the impl doc.
 
@@ -48,7 +48,17 @@ Running a single Go test within a package: `go test -v -race -run TestName ./pat
 
 - `cmd/mcp-go-gen/` — binary entry point; only owns `main.main()` and the `version`/`commit` ldflag variables. All real work lives under `internal/`.
 - `internal/cli/` — Cobra command tree (`root`, `init`, `validate`, `generate`), slog logger wiring, and the `ErrNotImplemented` sentinel for stubbed subcommands. Subcommands retrieve the logger via `loggerFrom(cmd.Context())`.
-- `internal/config/`, `internal/ir/`, `internal/gen/`, `internal/openapi/`, `internal/dst/`, `internal/scaffold/` — placeholder packages with `doc.go`; implementations land in the phase called out in each file's comment.
+- `internal/config/` — HCL2 schema (`schema.go`), decoder (`decode.go`), and the `ToIR` converter with every cross-field validation rule (`convert.go`). Fixtures under `testdata/hcl/{good,bad}/*.hcl`; `FuzzHCLDecode` lives in `fuzz_test.go`.
+- `internal/ir/` — the immutable spec the template renderer consumes. `Spec`, `Server`, `Observability`, `ProxySpec`, `EmbedSpec`, `Tool`, `Field`, `HTTPBackend`; `AuthSpec` is a sealed sum type with `AuthNone|Bearer|OIDC|OIDCDynamic`.
+- `internal/gen/`, `internal/openapi/`, `internal/dst/`, `internal/scaffold/` — placeholder packages with `doc.go`; implementations land in the phase called out in each file's comment.
+
+## Decoder and IR conventions
+
+- The decoder returns `*Config, hcl.Diagnostics` — callers check `diags.HasErrors()` before using the config. Structural errors (missing required attribute, wrong type) surface here.
+- Semantic rules (exactly-one auth block, unique tool names, openapi_operation requiring proxy.openapi.spec, field-type validation, version equality, duration parsing) live in `config.ToIR`, which returns a standard `error` via `errors.Join` so one invocation surfaces every violation at once.
+- Observability defaults are applied during `ToIR`, not in the HCL decoder. The resulting `ir.Observability` always has concrete values; templates never branch on "was the block present?"
+- `AuthSpec` is sealed via an unexported `isAuthSpec()` method. Do not add new variants outside `internal/ir/auth.go` — the generator relies on the closed set to avoid fallthrough bugs.
+- New field types (beyond the v1 primitives + flat arrays + enum) are explicitly out of scope for v1 per DESIGN-0004 non-goals. Rejection messages in `parseFieldType` cite this rule with a "v1 allows" hint.
 - `docs/` — managed by [docz](https://github.com/donaldgifford/docz). Subdirs: `adr/`, `rfc/`, `design/`, `impl/`, `plan/`, `investigation/`. Each has a `README.md` index that is regenerated automatically. Configuration in `.docz.yaml`. Don't edit the index tables by hand — use `docz update` (or the `docz:update` skill).
 - `docs/building-mcpgen.md` / `docs/using-mcpgen.md` — long-form walkthroughs that predate the docz structure; they are canonical reference material for the HCL schema, template shape, DST edit strategy, and generated layout.
 - `.github/workflows/` — CI (lint, test, build, security scan with govulncheck + Trivy, docker bake), license check, PR labeler, release.
