@@ -97,7 +97,7 @@ func TestToIR_AuthExactlyOne(t *testing.T) {
 			authBlk: `bearer { tokens_env = "X" }`,
 		},
 		{
-			name:    "two_blocks_rejected",
+			name: "two_blocks_rejected",
 			authBlk: `none {}
 				bearer { tokens_env = "X" }`,
 			wantErr: "exactly one",
