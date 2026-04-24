@@ -120,7 +120,7 @@ Implement the decoder and the IR conversion. This is the layer every later phase
 
 #### Tasks
 
-- [ ] Define the HCL schema structs in `internal/config/` using `github.com/hashicorp/hcl/v2` + `gohcl` tags, covering everything in DESIGN-0004 §"HCL Schema — Top Level": `mcpgen_version`, `server { listener, observability { logging, metrics, tracing }, auth {...} }`, top-level `proxy { base_url, auth, openapi, timeouts, retry }`, top-level `tool "<name>" { description, input { field "<name>" {...} }, backend {...} | openapi_operation }`.
+- [x] Define the HCL schema structs in `internal/config/` using `github.com/hashicorp/hcl/v2` + `gohcl` tags, covering everything in DESIGN-0004 §"HCL Schema — Top Level": `mcpgen_version`, `server { listener, observability { logging, metrics, tracing }, auth {...} }`, top-level `proxy { base_url, auth, openapi, timeouts, retry }`, top-level `tool "<name>" { description, input { field "<name>" {...} }, backend {...} | openapi_operation }`.
 - [ ] Decode all four auth block variants (`none`, `bearer`, `oidc`, `oidc_dynamic`) and enforce "exactly one" at decode time with a `hcl.Diagnostic` that points at the offending source range.
 - [ ] Define the IR in `internal/ir/` (see DESIGN-0004 §"Intermediate Representation"): `Spec`, `Server`, `Observability`, `ProxySpec`, `Tool`, `Field`, `HTTPBackend`, and the `AuthSpec` sum type with `isAuthSpec()` sealed method.
 - [ ] Build `config.ToIR(*config.Config) (*ir.Spec, error)` with all cross-field validation: duplicate tool names; `openapi_operation` set but no top-level `proxy.openapi.spec`; `backend` block present in `embed`-only contexts; unsupported input types; `mcpgen_version` must equal `"1"` (anything else → clear error with upgrade guidance).
