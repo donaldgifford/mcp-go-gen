@@ -468,6 +468,227 @@ proxy {
 	}
 }
 
+func TestToIR_ObservabilityOverrides(t *testing.T) {
+	t.Parallel()
+
+	spec, err := loadAndConvert(t, `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    none {}
+  }
+  observability {
+    logging {
+      format = "text"
+      level  = "debug"
+    }
+    metrics {
+      enabled = false
+      path    = "/m"
+      addr    = ":9001"
+    }
+    tracing {
+      enabled      = false
+      service_name = "svc"
+      sample_ratio = 0.1
+      exporter     = "otlp_http"
+      endpoint     = "http://collector:4318"
+    }
+  }
+}
+`)
+	if err != nil {
+		t.Fatalf("ToIR: %v", err)
+	}
+	if spec.Observability.Logging.Format != "text" {
+		t.Errorf("Logging.Format = %q, want text", spec.Observability.Logging.Format)
+	}
+	if spec.Observability.Logging.Level != "debug" {
+		t.Errorf("Logging.Level = %q, want debug", spec.Observability.Logging.Level)
+	}
+	if spec.Observability.Metrics.Enabled {
+		t.Error("Metrics.Enabled = true, want false")
+	}
+	if spec.Observability.Metrics.Path != "/m" {
+		t.Errorf("Metrics.Path = %q, want /m", spec.Observability.Metrics.Path)
+	}
+	if spec.Observability.Metrics.Addr != ":9001" {
+		t.Errorf("Metrics.Addr = %q, want :9001", spec.Observability.Metrics.Addr)
+	}
+	if spec.Observability.Tracing.Enabled {
+		t.Error("Tracing.Enabled = true, want false")
+	}
+	if spec.Observability.Tracing.SampleRatio != 0.1 {
+		t.Errorf("SampleRatio = %v, want 0.1", spec.Observability.Tracing.SampleRatio)
+	}
+}
+
+func TestToIR_BackendFullFeatures(t *testing.T) {
+	t.Parallel()
+
+	spec, err := loadAndConvert(t, `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    none {}
+  }
+}
+tool "get_rfc" {
+  description = "x"
+  input {
+    field "id" { type = "string" }
+    field "detail" { type = "boolean" }
+  }
+  backend "http" {
+    method = "get"
+    path   = "/rfcs/{id}"
+    path_param "id" {
+      from = "id"
+    }
+    query_param "detail" {
+      from = "detail"
+    }
+    header_param "x-tenant" {
+      from = "tenant"
+    }
+    response {
+      type             = "text"
+      content_template = "ok"
+    }
+    on_error {
+      not_found = "RFC %s not found"
+    }
+  }
+}
+`)
+	if err != nil {
+		t.Fatalf("ToIR: %v", err)
+	}
+	be := spec.Tools[0].Backend
+	if be == nil {
+		t.Fatal("Backend = nil")
+	}
+	if be.Method != "GET" {
+		t.Errorf("Method = %q, want GET (uppercased)", be.Method)
+	}
+	if len(be.PathParams) != 1 || be.PathParams[0].Name != "id" {
+		t.Errorf("PathParams = %v, want [{id id}]", be.PathParams)
+	}
+	if len(be.QueryParams) != 1 || be.QueryParams[0].From != "detail" {
+		t.Errorf("QueryParams = %v", be.QueryParams)
+	}
+	if len(be.HeaderParams) != 1 || be.HeaderParams[0].Name != "x-tenant" {
+		t.Errorf("HeaderParams = %v", be.HeaderParams)
+	}
+	if be.Response.Type != "text" {
+		t.Errorf("Response.Type = %q, want text", be.Response.Type)
+	}
+	if be.OnError.NotFound != "RFC %s not found" {
+		t.Errorf("OnError.NotFound = %q", be.OnError.NotFound)
+	}
+}
+
+func TestToIR_BackendBadResponseType(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadAndConvert(t, `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    none {}
+  }
+}
+tool "t" {
+  description = "x"
+  backend "http" {
+    method = "GET"
+    path   = "/x"
+    response {
+      type = "xml"
+    }
+  }
+}
+`)
+	if err == nil || !strings.Contains(err.Error(), "backend.response.type") {
+		t.Fatalf("err = %v, want backend.response.type error", err)
+	}
+}
+
+func TestToIR_OIDCFullFields(t *testing.T) {
+	t.Parallel()
+
+	spec, err := loadAndConvert(t, `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    oidc {
+      issuer          = "https://auth/main"
+      jwks_url        = "https://auth/main/jwks"
+      audience        = "mcp"
+      required_scopes = ["mcp:read", "mcp:write"]
+      subject_claim   = "sub"
+    }
+  }
+}
+`)
+	if err != nil {
+		t.Fatalf("ToIR: %v", err)
+	}
+	oidc, ok := spec.Auth.(ir.AuthOIDC)
+	if !ok {
+		t.Fatalf("Auth = %T", spec.Auth)
+	}
+	if oidc.JWKSURL != "https://auth/main/jwks" {
+		t.Errorf("JWKSURL = %q", oidc.JWKSURL)
+	}
+	if !slicesEq(oidc.RequiredScopes, []string{"mcp:read", "mcp:write"}) {
+		t.Errorf("RequiredScopes = %v", oidc.RequiredScopes)
+	}
+}
+
+func TestToIR_OIDCDynamicInvalidCacheTTL(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadAndConvert(t, `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    oidc_dynamic {
+      issuer    = "https://auth/main"
+      audience  = "mcp"
+      cache_ttl = "bogus"
+    }
+  }
+}
+`)
+	if err == nil || !strings.Contains(err.Error(), "cache_ttl") {
+		t.Fatalf("err = %v, want cache_ttl duration error", err)
+	}
+}
+
+func TestFormatDiagnostics_NonEmpty(t *testing.T) {
+	t.Parallel()
+
+	_, diags := DecodeBytes([]byte(`invalid `), "bad.hcl")
+	if !diags.HasErrors() {
+		t.Fatal("expected diagnostics on bad input")
+	}
+	out := FormatDiagnostics(diags, nil)
+	if out == "" {
+		t.Error("FormatDiagnostics returned empty on diagnostics")
+	}
+}
+
 func TestToIR_NilConfigRejected(t *testing.T) {
 	t.Parallel()
 
