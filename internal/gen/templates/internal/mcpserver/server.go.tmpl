@@ -1,0 +1,48 @@
+
+package mcpserver
+
+import (
+	"{{.Server.Name}}/internal/observability"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+// Server wraps the mark3labs MCP server and keeps references to the
+// observability types so tool handlers can record metrics and spans.
+type Server struct {
+	Core    *server.MCPServer
+	Tools   *Tools
+	Metrics *observability.Metrics
+}
+
+// New constructs the MCP server, registers every declared tool, and
+// returns a handle to the caller.
+func New(m *observability.Metrics, tracer observability.Tracer{{if .Proxy}}, backend *Backend{{end}}) *Server {
+	core := server.NewMCPServer(
+		{{printf "%q" .Server.Name}},
+		{{quotedOr .Server.Version "0.0.0"}},
+		server.WithToolCapabilities(false),
+	)
+
+	tools := &Tools{
+		Metrics: m,
+		Tracer:  tracer,
+		{{if .Proxy}}Backend: backend,{{end}}
+	}
+
+	{{range $tool := .Tools}}
+	core.AddTool(
+		mcp.NewTool(
+			{{printf "%q" $tool.Name}},
+			mcp.WithDescription({{printf "%q" $tool.Description}}),
+			{{range $tool.Inputs -}}
+			mcp.WithString({{printf "%q" .Name}}, mcp.Description({{printf "%q" .Description}}){{if .Required}}, mcp.Required(){{end}}),
+			{{end -}}
+		),
+		tools.{{goIdent $tool.Name}},
+	)
+	{{end}}
+
+	return &Server{Core: core, Tools: tools, Metrics: m}
+}

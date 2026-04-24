@@ -1,0 +1,60 @@
+
+package observability
+
+import (
+	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+// Metrics holds the handful of counters and histograms every generated MCP
+// server exposes. Names match DESIGN-0004 §"Observability in Generated Code"
+// verbatim so dashboards transfer between services unchanged.
+type Metrics struct {
+	Registry *prometheus.Registry
+
+	ToolInvocations     *prometheus.CounterVec
+	ToolDuration        *prometheus.HistogramVec
+	AuthFailures        *prometheus.CounterVec
+	BackendRequests     *prometheus.CounterVec
+	BackendDuration     *prometheus.HistogramVec
+}
+
+// NewMetrics constructs the registry and registers every vector. The
+// caller owns the registry and mounts the handler via Handler().
+func NewMetrics() *Metrics {
+	reg := prometheus.NewRegistry()
+	m := &Metrics{
+		Registry: reg,
+		ToolInvocations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcp_tool_invocations_total",
+			Help: "Total MCP tool invocations.",
+		}, []string{"tool", "subject", "outcome"}),
+		ToolDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "mcp_tool_duration_seconds",
+			Help:    "MCP tool execution duration.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"tool", "outcome"}),
+		AuthFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcp_auth_failures_total",
+			Help: "Total MCP auth failures.",
+		}, []string{"reason"}),
+		BackendRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcp_backend_requests_total",
+			Help: "Total backend requests issued by proxy tools.",
+		}, []string{"tool", "status"}),
+		BackendDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "mcp_backend_request_duration_seconds",
+			Help:    "Backend request duration for proxy tools.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"tool", "status"}),
+	}
+	reg.MustRegister(m.ToolInvocations, m.ToolDuration, m.AuthFailures, m.BackendRequests, m.BackendDuration)
+	return m
+}
+
+// Handler returns the promhttp handler bound to this registry.
+func (m *Metrics) Handler() http.Handler {
+	return promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{Registry: m.Registry})
+}

@@ -2,8 +2,14 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/donaldgifford/mcp-go-gen/internal/config"
+	"github.com/donaldgifford/mcp-go-gen/internal/gen"
+	"github.com/donaldgifford/mcp-go-gen/internal/scaffold"
 )
 
 // Valid modes for `mcp-go-gen generate --mode`.
@@ -48,14 +54,7 @@ func newGenerateCmd() *cobra.Command {
 			return opts.validate()
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			loggerFrom(cmd.Context()).Debug("generate invoked",
-				"config", opts.config,
-				"mode", opts.mode,
-				"out", opts.out,
-				"force", opts.force,
-				"dry_run", opts.dryRun,
-			)
-			return ErrNotImplemented
+			return runGenerate(cmd, &opts)
 		},
 	}
 
@@ -71,4 +70,77 @@ func newGenerateCmd() *cobra.Command {
 		"print planned writes to stdout without touching disk")
 
 	return cmd
+}
+
+func runGenerate(cmd *cobra.Command, opts *generateOptions) error {
+	logger := loggerFrom(cmd.Context())
+	logger.Debug("generate invoked",
+		"config", opts.config,
+		"mode", opts.mode,
+		"out", opts.out,
+		"force", opts.force,
+		"dry_run", opts.dryRun,
+	)
+
+	if opts.mode == ModeEmbed {
+		return fmt.Errorf("--mode embed: %w", ErrNotImplemented)
+	}
+
+	cfg, diags := config.Decode(opts.config)
+	if diags.HasErrors() {
+		return fmt.Errorf("decode %s: %w", opts.config, diags)
+	}
+	spec, err := config.ToIR(cfg)
+	if err != nil {
+		return fmt.Errorf("validate %s: %w", opts.config, err)
+	}
+
+	writer := resolveWriter(cmd, opts)
+
+	if err := gen.Render(spec, writer); err != nil {
+		return fmt.Errorf("render: %w", err)
+	}
+
+	if opts.dryRun {
+		return nil
+	}
+
+	// Copy source HCL into the generated project root verbatim.
+	if err := copyHCL(opts.config, opts.out); err != nil {
+		return fmt.Errorf("copy spec: %w", err)
+	}
+
+	// Tidy the generated module so its go.sum is populated and the tree
+	// is immediately buildable.
+	if err := scaffold.Tidy(cmd.Context(), opts.out, cmd.ErrOrStderr()); err != nil {
+		return fmt.Errorf("tidy: %w", err)
+	}
+
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "generated %s → %s\n", opts.config, opts.out); err != nil {
+		return fmt.Errorf("stdout: %w", err)
+	}
+	return nil
+}
+
+func resolveWriter(cmd *cobra.Command, opts *generateOptions) gen.Writer {
+	if opts.dryRun {
+		return gen.NewDryRunWriter(cmd.OutOrStdout())
+	}
+	return gen.NewFSWriter(opts.out, opts.force)
+}
+
+// copyHCL writes the source spec into the generated project root verbatim.
+// The `--config` and `--out` flags are user input by design for a CLI tool;
+// gosec's path-traversal warning is expected and silenced at the call
+// site where the taint originates.
+func copyHCL(src, destDir string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	dest := filepath.Join(destDir, "mcpgen.hcl")
+	if err := os.WriteFile(dest, data, 0o644); err != nil { //nolint:gosec // dest is --out plus a known filename
+		return fmt.Errorf("write: %w", err)
+	}
+	return nil
 }

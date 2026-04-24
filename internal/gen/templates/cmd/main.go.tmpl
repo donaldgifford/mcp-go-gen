@@ -3,9 +3,113 @@
 package main
 
 import (
-	"log"
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"{{.Server.Name}}/internal/mcpauth"
+	"{{.Server.Name}}/internal/mcpserver"
+	"{{.Server.Name}}/internal/observability"
+
+	"github.com/mark3labs/mcp-go/server"
 )
 
 func main() {
-	log.Println("{{.Server.Name}} — scaffolded by mcp-go-gen; handler wiring lands in a subsequent phase")
+	if err := run(); err != nil {
+		slog.Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	logger := observability.NewLogger(os.Stderr)
+	slog.SetDefault(logger)
+
+	tracer, shutdownTracing, err := observability.InitTracing(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(shutdownCtx)
+	}()
+
+	metrics := observability.NewMetrics()
+
+	authMw, err := mcpauth.NewMiddleware()
+	if err != nil {
+		return err
+	}
+	authMw.OnFailure = func(reason string) {
+		metrics.AuthFailures.WithLabelValues(reason).Inc()
+	}
+
+	{{if .Proxy}}backend := mcpserver.NewBackend(){{end}}
+	srv := mcpserver.New(metrics, tracer{{if .Proxy}}, backend{{end}})
+
+	// MCP HTTP transport — mounts on {{.Server.EndpointPath}}.
+	httpTransport := server.NewStreamableHTTPServer(srv.Core,
+		server.WithEndpointPath({{printf "%q" .Server.EndpointPath}}),
+	)
+
+	mux := http.NewServeMux()
+	mux.Handle({{printf "%q" .Server.EndpointPath}}, authMw.Wrap(httpTransport))
+	{{if and .Observability.Metrics.Enabled (eq .Observability.Metrics.Addr "")}}
+	mux.Handle({{printf "%q" .Observability.Metrics.Path}}, metrics.Handler())
+	{{end}}
+
+	mainSrv := &http.Server{
+		Addr:              {{printf "%q" .Server.ListenerAddr}},
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	{{if and .Observability.Metrics.Enabled (ne .Observability.Metrics.Addr "")}}
+	// Metrics on a separate listener.
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle({{printf "%q" .Observability.Metrics.Path}}, metrics.Handler())
+	metricsSrv := &http.Server{
+		Addr:              {{printf "%q" .Observability.Metrics.Addr}},
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		slog.InfoContext(ctx, "metrics listening", "addr", metricsSrv.Addr)
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("metrics server exit", "err", err)
+		}
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = metricsSrv.Shutdown(shutdownCtx)
+	}()
+	{{end}}
+
+	errCh := make(chan error, 1)
+	go func() {
+		slog.InfoContext(ctx, "mcp server listening", "addr", mainSrv.Addr, "endpoint", {{printf "%q" .Server.EndpointPath}})
+		errCh <- mainSrv.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return mainSrv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
 }

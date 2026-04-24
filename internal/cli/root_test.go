@@ -86,15 +86,21 @@ func TestGenerateCmd_UnknownModeRejected(t *testing.T) {
 func TestGenerateCmd_DryRunAndForceBothAllowed(t *testing.T) {
 	t.Parallel()
 
+	// Use a nonexistent config so flag parsing succeeds but the run
+	// fails at a later step. The assertion here is purely about Cobra
+	// accepting --dry-run + --force together; the Decode failure is
+	// the first concrete side effect we can observe without a fixture.
 	cmd := newRootCmd("test", "deadbeef")
-	cmd.SetArgs([]string{"generate", "--mode", "new", "--out", "/tmp/x", "--dry-run", "--force"})
+	cmd.SetArgs([]string{"generate", "--config", "/nonexistent.hcl", "--mode", "new", "--out", "/tmp/x", "--dry-run", "--force"})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 
 	err := cmd.Execute()
-	// Both flags set together should parse fine and only hit ErrNotImplemented.
-	if err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("expected ErrNotImplemented, got %v", err)
+	if err == nil {
+		t.Fatal("expected error from nonexistent config")
+	}
+	if strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("flag rejected: %v", err)
 	}
 }
 

@@ -1,0 +1,62 @@
+
+package observability
+
+import (
+	"context"
+{{if .Observability.Tracing.Enabled}}
+	"fmt"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
+{{else}}
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+{{end}}
+)
+
+// Tracer is the tracer every generated tool handler uses.
+type Tracer = trace.Tracer
+
+// InitTracing configures the OpenTelemetry global tracer provider. When
+// tracing is disabled in the HCL spec, a noop provider is installed so that
+// handler templates can call into the tracing API unconditionally.
+//
+// Returns a shutdown function that flushes spans on exit.
+func InitTracing(ctx context.Context) (Tracer, func(context.Context) error, error) {
+{{if .Observability.Tracing.Enabled}}
+	exp, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpointURL({{quotedOr .Observability.Tracing.Endpoint "http://localhost:4318"}}),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("otlp exporter: %w", err)
+	}
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName({{quotedOr .Observability.Tracing.ServiceName .Server.Name}}),
+		),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resource: %w", err)
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.TraceIDRatioBased({{if eq .Observability.Tracing.SampleRatio 0.0}}1.0{{else}}{{.Observability.Tracing.SampleRatio}}{{end}})),
+	)
+	otel.SetTracerProvider(tp)
+	return tp.Tracer({{quotedOr .Observability.Tracing.ServiceName .Server.Name}}), tp.Shutdown, nil
+{{else}}
+	_ = ctx
+	tp := noop.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	shutdown := func(context.Context) error { return nil }
+	return tp.Tracer({{quotedOr .Observability.Tracing.ServiceName .Server.Name}}), shutdown, nil
+{{end}}
+}
