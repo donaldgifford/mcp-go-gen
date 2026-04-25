@@ -1,0 +1,169 @@
+{{/* auth_oidc_dynamic: resolves the issuer's discovery document at startup
+     and builds a verifier from its advertised JWKS. If discovery fails
+     the process refuses to start — silent degradation hides broken
+     environments behind permissive auth. */}}
+package mcpauth
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+)
+
+// Subject is the identity attached to context by the auth middleware. Tool
+// handlers use SubjectFromContext to read it. The type stays identical
+// across auth schemes so handler code does not fork.
+type Subject struct {
+	Name   string
+	Claims map[string]any
+}
+
+type subjectKey struct{}
+
+// SubjectFromContext returns the subject previously stored by the auth
+// middleware, or an anonymous subject if none is present.
+func SubjectFromContext(ctx context.Context) (Subject, bool) {
+	s, ok := ctx.Value(subjectKey{}).(Subject)
+	return s, ok
+}
+
+// ContextWithSubject stores s on ctx.
+func ContextWithSubject(ctx context.Context, s Subject) context.Context {
+	return context.WithValue(ctx, subjectKey{}, s)
+}
+
+// cacheTTL is how long the provider/verifier handle is reused before a
+// fresh discovery round-trip. Configured via the HCL auth.oidc_dynamic
+// cache_ttl field.
+const cacheTTL = {{printf "%d" (.Auth.CacheTTL.Nanoseconds)}} * time.Nanosecond
+
+// Middleware verifies inbound bearer tokens. The provider is fetched via
+// OIDC discovery at construction time and cached for cacheTTL; the next
+// request after expiry triggers a synchronous rediscovery.
+type Middleware struct {
+	issuer         string
+	audience       string
+	requiredScopes []string
+	subjectClaim   string
+	OnFailure      func(reason string)
+
+	verifier  *oidc.IDTokenVerifier
+	expiresAt time.Time
+}
+
+// NewMiddleware performs the initial discovery call. If the issuer is
+// unreachable or the document is malformed, the process exits via the
+// returned error rather than serving traffic without auth.
+func NewMiddleware(ctx context.Context) (*Middleware, error) {
+	m := &Middleware{
+		issuer:         {{printf "%q" .Auth.Issuer}},
+		audience:       {{printf "%q" .Auth.Audience}},
+		requiredScopes: []string{ {{range $i, $s := .Auth.RequiredScopes}}{{if $i}}, {{end}}{{printf "%q" $s}}{{end}} },
+		subjectClaim:   {{quotedOr .Auth.SubjectClaim "sub"}},
+	}
+	if err := m.refresh(ctx); err != nil {
+		return nil, fmt.Errorf("oidc discovery: %w", err)
+	}
+	return m, nil
+}
+
+func (m *Middleware) refresh(ctx context.Context) error {
+	provider, err := oidc.NewProvider(ctx, m.issuer)
+	if err != nil {
+		return err
+	}
+	m.verifier = provider.Verifier(&oidc.Config{ClientID: m.audience})
+	m.expiresAt = time.Now().Add(cacheTTL)
+	return nil
+}
+
+// Wrap verifies every request's Authorization header. On expiry the
+// middleware triggers a foreground refresh; if that refresh fails, the
+// request is rejected and the existing verifier remains in place for
+// subsequent attempts.
+func (m *Middleware) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if time.Now().After(m.expiresAt) {
+			if err := m.refresh(r.Context()); err != nil {
+				m.fail(w, "discovery_refresh_failed")
+				return
+			}
+		}
+		token := bearerFromHeader(r.Header.Get("Authorization"))
+		if token == "" {
+			m.fail(w, "missing")
+			return
+		}
+		idToken, err := m.verifier.Verify(r.Context(), token)
+		if err != nil {
+			m.fail(w, classifyVerifyErr(err))
+			return
+		}
+		var claims map[string]any
+		if err := idToken.Claims(&claims); err != nil {
+			m.fail(w, "bad_claims")
+			return
+		}
+		if err := m.checkScopes(claims); err != nil {
+			m.fail(w, "scope_mismatch")
+			return
+		}
+		sub, _ := claims[m.subjectClaim].(string)
+		if sub == "" {
+			sub = idToken.Subject
+		}
+		ctx := ContextWithSubject(r.Context(), Subject{Name: sub, Claims: claims})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (m *Middleware) checkScopes(claims map[string]any) error {
+	if len(m.requiredScopes) == 0 {
+		return nil
+	}
+	raw, _ := claims["scope"].(string)
+	have := make(map[string]struct{}, strings.Count(raw, " ")+1)
+	for _, s := range strings.Fields(raw) {
+		have[s] = struct{}{}
+	}
+	for _, want := range m.requiredScopes {
+		if _, ok := have[want]; !ok {
+			return fmt.Errorf("missing scope %q", want)
+		}
+	}
+	return nil
+}
+
+func (m *Middleware) fail(w http.ResponseWriter, reason string) {
+	if m.OnFailure != nil {
+		m.OnFailure(reason)
+	}
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
+func bearerFromHeader(h string) string {
+	const prefix = "Bearer "
+	rest, ok := strings.CutPrefix(h, prefix)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(rest)
+}
+
+func classifyVerifyErr(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "expired"):
+		return "expired"
+	case strings.Contains(msg, "audience"):
+		return "bad_audience"
+	case strings.Contains(msg, "signature"):
+		return "bad_signature"
+	default:
+		return "invalid_token"
+	}
+}

@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: nested
+  version: 1.0.0
+paths:
+  /things:
+    post:
+      operationId: createThing
+      parameters:
+        - name: filter
+          in: query
+          required: true
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+              age:
+                type: integer
+      responses:
+        '200':
+          description: ok

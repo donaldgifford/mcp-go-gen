@@ -1,0 +1,106 @@
+{{/* Bearer auth middleware: static name:token pairs loaded from env. */}}
+package mcpauth
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"strings"
+)
+
+// Subject is the identity attached to context by the auth middleware. Tool
+// handlers use SubjectFromContext to read it. The type stays identical
+// across auth schemes so handler code does not fork.
+type Subject struct {
+	Name string
+}
+
+type subjectKey struct{}
+
+// SubjectFromContext returns the subject previously stored by the auth
+// middleware, or an anonymous subject if none is present. Tools that need
+// to enforce identity should check (subject.Name == "" || anon).
+func SubjectFromContext(ctx context.Context) (Subject, bool) {
+	s, ok := ctx.Value(subjectKey{}).(Subject)
+	return s, ok
+}
+
+// ContextWithSubject stores s on ctx. Exported so the middleware and tests
+// can install it without reaching into internals.
+func ContextWithSubject(ctx context.Context, s Subject) context.Context {
+	return context.WithValue(ctx, subjectKey{}, s)
+}
+
+// Middleware is the auth http.Handler wrapper. It reads the configured
+// bearer tokens env var, parses name:token pairs once, and on each request
+// matches the Authorization header against the map. On failure it returns
+// 401 and bumps the auth_failures_total counter.
+//
+// The OnFailure callback lets the caller increment the metric without
+// introducing a direct dependency from this package on the observability
+// Metrics type.
+type Middleware struct {
+	tokens    map[string]string // token → subject name
+	OnFailure func(reason string)
+}
+
+// NewMiddleware loads tokens from the env var configured at generate time.
+// The expected format is "name1:token1,name2:token2". The ctx argument is
+// accepted for API parity with the other auth schemes (oidc/oidc_dynamic
+// need it for discovery); bearer never reads from it.
+func NewMiddleware(ctx context.Context) (*Middleware, error) {
+	_ = ctx
+	raw := os.Getenv({{printf "%q" .Auth.TokensEnv}})
+	m := &Middleware{tokens: parseTokens(raw)}
+	return m, nil
+}
+
+func parseTokens(raw string) map[string]string {
+	m := make(map[string]string)
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		m[strings.TrimSpace(parts[1])] = strings.TrimSpace(parts[0])
+	}
+	return m
+}
+
+// Wrap returns an http.Handler that authenticates every request to next.
+func (m *Middleware) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := bearerFromHeader(r.Header.Get("Authorization"))
+		if token == "" {
+			m.fail(w, "missing")
+			return
+		}
+		name, ok := m.tokens[token]
+		if !ok {
+			m.fail(w, "unknown_token")
+			return
+		}
+		ctx := ContextWithSubject(r.Context(), Subject{Name: name})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (m *Middleware) fail(w http.ResponseWriter, reason string) {
+	if m.OnFailure != nil {
+		m.OnFailure(reason)
+	}
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
+func bearerFromHeader(h string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(h, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(h, prefix))
+}
+

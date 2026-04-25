@@ -1,0 +1,61 @@
+
+package observability
+
+import (
+	"context"
+	"io"
+	"log/slog"
+
+	"go.opentelemetry.io/otel/trace"
+)
+
+// NewLogger returns a slog.Logger whose handler stamps trace_id and span_id
+// onto every record emitted with a live OpenTelemetry context. Format is
+// "{{.Observability.Logging.Format}}" and the baseline level is
+// "{{.Observability.Logging.Level}}" per the generated mcpgen.hcl — adjust
+// by regenerating with a different logging block.
+func NewLogger(w io.Writer) *slog.Logger {
+	level := slog.LevelInfo
+	{{if eq .Observability.Logging.Level "debug"}}level = slog.LevelDebug{{end}}
+	{{if eq .Observability.Logging.Level "warn"}}level = slog.LevelWarn{{end}}
+	{{if eq .Observability.Logging.Level "error"}}level = slog.LevelError{{end}}
+
+	opts := &slog.HandlerOptions{Level: level}
+	{{if eq .Observability.Logging.Format "text"}}
+	base := slog.NewTextHandler(w, opts)
+	{{else}}
+	base := slog.NewJSONHandler(w, opts)
+	{{end}}
+	return slog.New(&traceHandler{inner: base})
+}
+
+// traceHandler wraps an slog.Handler and decorates each record with the
+// active OpenTelemetry span's trace_id and span_id when present. It is the
+// generator's self-contained equivalent of the webhookd Phase 1 pattern
+// referenced in docs/guide/mcp-server-in-go.md §10.3.
+type traceHandler struct {
+	inner slog.Handler
+}
+
+func (h *traceHandler) Enabled(ctx context.Context, lvl slog.Level) bool {
+	return h.inner.Enabled(ctx, lvl)
+}
+
+func (h *traceHandler) Handle(ctx context.Context, r slog.Record) error {
+	if span := trace.SpanFromContext(ctx); span != nil && span.SpanContext().IsValid() {
+		sc := span.SpanContext()
+		r.AddAttrs(
+			slog.String("trace_id", sc.TraceID().String()),
+			slog.String("span_id", sc.SpanID().String()),
+		)
+	}
+	return h.inner.Handle(ctx, r)
+}
+
+func (h *traceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &traceHandler{inner: h.inner.WithAttrs(attrs)}
+}
+
+func (h *traceHandler) WithGroup(name string) slog.Handler {
+	return &traceHandler{inner: h.inner.WithGroup(name)}
+}

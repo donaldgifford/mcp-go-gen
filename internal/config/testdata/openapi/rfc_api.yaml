@@ -1,0 +1,56 @@
+openapi: 3.0.3
+info:
+  title: RFC API
+  version: 1.0.0
+paths:
+  /rfcs/{id}:
+    get:
+      operationId: getRfcById
+      summary: Fetch an RFC by its identifier.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: RFC identifier, e.g. RFC-0042.
+          schema:
+            type: string
+        - name: include_draft
+          in: query
+          required: false
+          description: Include draft RFCs in the result.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: The RFC.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  title: { type: string }
+  /rfcs:
+    get:
+      operationId: listRfcs
+      summary: List RFCs, optionally filtered by status.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - draft
+              - accepted
+              - rejected
+        - name: tags
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200':
+          description: A list of RFCs.

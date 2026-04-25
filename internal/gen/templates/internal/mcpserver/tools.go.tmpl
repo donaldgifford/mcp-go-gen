@@ -1,0 +1,63 @@
+
+package mcpserver
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"{{.ModulePath}}/internal/mcpauth"
+	"{{.ModulePath}}/internal/observability"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"go.opentelemetry.io/otel/attribute"
+)
+
+// Tools owns every tool handler. A pointer receiver is used so the MCP
+// server can keep a single handle and call methods by name via AddTool.
+type Tools struct {
+	Metrics *observability.Metrics
+	Tracer  observability.Tracer
+	{{if .Proxy}}Backend *Backend{{end}}
+}
+
+{{range $tool := .Tools}}
+
+// {{goIdent $tool.Name}} implements the "{{$tool.Name}}" tool. Handler shape
+// mirrors docs/guide/mcp-server-in-go.md §11 — span, subject attribution,
+// input parse, backend call, outcome metric, structured log.
+func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	start := time.Now()
+	subj, _ := mcpauth.SubjectFromContext(ctx)
+
+	ctx, span := t.Tracer.Start(ctx, "mcp.tool.{{$tool.Name}}")
+	defer span.End()
+	span.SetAttributes(attribute.String("mcp.subject", subj.Name))
+
+	{{range $tool.Inputs -}}
+	{{.Name}}, err := req.RequireString({{printf "%q" .Name}})
+	if err != nil {
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "bad_input", start)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	_ = {{.Name}}
+	{{end}}
+
+	{{/* v1 Phase 3 MVP: stub body. Proxy call lands in follow-up. */ -}}
+	t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "success", start)
+	slog.InfoContext(ctx, "mcp tool completed",
+		"tool", {{printf "%q" $tool.Name}},
+		"mcp.subject", subj.Name,
+		"outcome", "success",
+		"duration_ms", time.Since(start).Milliseconds())
+	return mcp.NewToolResultText("{{$tool.Name}}: ok"), nil
+}
+{{end}}
+
+// recordOutcome increments the two tool-level counters for every
+// terminated handler. Called from every exit path so metrics are
+// complete even when the handler returns an error result.
+func (t *Tools) recordOutcome(tool, subject, outcome string, start time.Time) {
+	t.Metrics.ToolInvocations.WithLabelValues(tool, subject, outcome).Inc()
+	t.Metrics.ToolDuration.WithLabelValues(tool, outcome).Observe(time.Since(start).Seconds())
+}

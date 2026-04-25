@@ -1,0 +1,144 @@
+{{/* auth_oidc: fixed issuer + fixed JWKS URL. No discovery call at
+     startup — callers that want discovery use auth_oidc_dynamic. */}}
+package mcpauth
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+)
+
+// Subject is the identity attached to context by the auth middleware. Tool
+// handlers use SubjectFromContext to read it. The type stays identical
+// across auth schemes so handler code does not fork.
+type Subject struct {
+	Name   string
+	Claims map[string]any
+}
+
+type subjectKey struct{}
+
+// SubjectFromContext returns the subject previously stored by the auth
+// middleware, or an anonymous subject if none is present.
+func SubjectFromContext(ctx context.Context) (Subject, bool) {
+	s, ok := ctx.Value(subjectKey{}).(Subject)
+	return s, ok
+}
+
+// ContextWithSubject stores s on ctx.
+func ContextWithSubject(ctx context.Context, s Subject) context.Context {
+	return context.WithValue(ctx, subjectKey{}, s)
+}
+
+// Middleware verifies inbound bearer tokens against the configured JWKS.
+// The verifier is constructed once at startup; each request performs a
+// signature check and the configured audience/scope enforcement.
+type Middleware struct {
+	verifier       *oidc.IDTokenVerifier
+	audience       string
+	requiredScopes []string
+	subjectClaim   string
+	OnFailure      func(reason string)
+}
+
+// NewMiddleware builds a verifier over the fixed issuer + JWKS URL. It
+// does not reach the network at startup — the key set is fetched lazily
+// on the first request.
+func NewMiddleware(ctx context.Context) (*Middleware, error) {
+	keySet := oidc.NewRemoteKeySet(ctx, {{printf "%q" .Auth.JWKSURL}})
+	cfg := &oidc.Config{
+		ClientID: {{printf "%q" .Auth.Audience}},
+	}
+	verifier := oidc.NewVerifier({{printf "%q" .Auth.Issuer}}, keySet, cfg)
+	return &Middleware{
+		verifier:       verifier,
+		audience:       {{printf "%q" .Auth.Audience}},
+		requiredScopes: []string{ {{range $i, $s := .Auth.RequiredScopes}}{{if $i}}, {{end}}{{printf "%q" $s}}{{end}} },
+		subjectClaim:   {{quotedOr .Auth.SubjectClaim "sub"}},
+	}, nil
+}
+
+// Wrap returns an http.Handler that verifies every request's Authorization
+// header as a JWT, enforces audience + required scopes, and stores the
+// Subject on context.
+func (m *Middleware) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := bearerFromHeader(r.Header.Get("Authorization"))
+		if token == "" {
+			m.fail(w, "missing")
+			return
+		}
+		idToken, err := m.verifier.Verify(r.Context(), token)
+		if err != nil {
+			m.fail(w, classifyVerifyErr(err))
+			return
+		}
+		var claims map[string]any
+		if err := idToken.Claims(&claims); err != nil {
+			m.fail(w, "bad_claims")
+			return
+		}
+		if err := m.checkScopes(claims); err != nil {
+			m.fail(w, "scope_mismatch")
+			return
+		}
+		sub, _ := claims[m.subjectClaim].(string)
+		if sub == "" {
+			sub = idToken.Subject
+		}
+		ctx := ContextWithSubject(r.Context(), Subject{Name: sub, Claims: claims})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (m *Middleware) checkScopes(claims map[string]any) error {
+	if len(m.requiredScopes) == 0 {
+		return nil
+	}
+	raw, _ := claims["scope"].(string)
+	have := make(map[string]struct{}, strings.Count(raw, " ")+1)
+	for _, s := range strings.Fields(raw) {
+		have[s] = struct{}{}
+	}
+	for _, want := range m.requiredScopes {
+		if _, ok := have[want]; !ok {
+			return fmt.Errorf("missing scope %q", want)
+		}
+	}
+	return nil
+}
+
+func (m *Middleware) fail(w http.ResponseWriter, reason string) {
+	if m.OnFailure != nil {
+		m.OnFailure(reason)
+	}
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
+func bearerFromHeader(h string) string {
+	const prefix = "Bearer "
+	rest, ok := strings.CutPrefix(h, prefix)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(rest)
+}
+
+// classifyVerifyErr maps an OIDC verification failure to a stable reason
+// label used by the mcp_auth_failures_total metric.
+func classifyVerifyErr(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "expired"):
+		return "expired"
+	case strings.Contains(msg, "audience"):
+		return "bad_audience"
+	case strings.Contains(msg, "signature"):
+		return "bad_signature"
+	default:
+		return "invalid_token"
+	}
+}

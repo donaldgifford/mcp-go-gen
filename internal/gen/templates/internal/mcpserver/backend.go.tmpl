@@ -1,0 +1,30 @@
+{{/* Emitted only when spec.Proxy is non-nil. */ -}}
+package mcpserver
+
+import (
+	"net/http"
+	{{if .Proxy.Bearer}}"os"
+	{{end}}"time"
+)
+
+// Backend is the HTTP client proxy tools use to reach the upstream service.
+// Phase 3 MVP: minimum useful client; retry, timeouts, and per-tool
+// marshaling expand in follow-up commits.
+type Backend struct {
+	BaseURL string
+	Token   string
+	Client  *http.Client
+}
+
+// NewBackend wires a timeouts-respecting http.Client from the HCL-configured
+// values. When the bearer token env var is unset, an empty string is used —
+// the caller is expected to handle upstream 401s via on_error rules.
+func NewBackend() *Backend {
+	return &Backend{
+		BaseURL: {{printf "%q" .Proxy.BaseURL}},
+		{{if .Proxy.Bearer}}Token:   os.Getenv({{printf "%q" .Proxy.Bearer.TokenEnv}}),{{end}}
+		Client: &http.Client{
+			Timeout: {{if .Proxy.TotalTimeout}}{{.Proxy.TotalTimeout.Nanoseconds}} * time.Nanosecond{{else}}30 * time.Second{{end}},
+		},
+	}
+}

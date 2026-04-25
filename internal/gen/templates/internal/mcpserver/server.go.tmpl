@@ -1,0 +1,66 @@
+
+package mcpserver
+
+import (
+	"context"
+
+	"{{.ModulePath}}/internal/observability"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+// Server wraps the mark3labs MCP server and keeps references to the
+// observability types so tool handlers can record metrics and spans.
+type Server struct {
+	Core    *server.MCPServer
+	Tools   *Tools
+	Metrics *observability.Metrics
+}
+
+// New constructs the MCP server, registers every declared tool, and
+// returns a handle to the caller.
+func New(m *observability.Metrics, tracer observability.Tracer{{if .Proxy}}, backend *Backend{{end}}) *Server {
+	core := server.NewMCPServer(
+		{{printf "%q" .Server.Name}},
+		{{quotedOr .Server.Version "0.0.0"}},
+		server.WithToolCapabilities(false),
+	)
+
+	tools := &Tools{
+		Metrics: m,
+		Tracer:  tracer,
+		{{if .Proxy}}Backend: backend,{{end}}
+	}
+
+	{{range $tool := .Tools}}
+	core.AddTool(
+		mcp.NewTool(
+			{{printf "%q" $tool.Name}},
+			mcp.WithDescription({{printf "%q" $tool.Description}}),
+			{{range $tool.Inputs -}}
+			mcp.WithString({{printf "%q" .Name}}, mcp.Description({{printf "%q" .Description}}){{if .Required}}, mcp.Required(){{end}}),
+			{{end -}}
+		),
+		tools.{{goIdent $tool.Name}},
+	)
+	{{end}}
+
+	return &Server{Core: core, Tools: tools, Metrics: m}
+}
+
+// Register is the embed-mode entry point. Generated mcp-go-gen output
+// inserts `mcpserver.Register(ctx, app, cfg)` at the `// mcpgen:hook`
+// marker in the user's main.go; this function is responsible for
+// instantiating observability + auth + the MCP server and mounting it
+// wherever the user expects.
+//
+// Phase 6 ships a no-op stub — the real body is filled in as part of
+// the first dogfooded embed service (Phase 7). The signature is fixed
+// so the DST edit is stable across mcpgen versions.
+func Register(ctx context.Context, app, cfg any) error {
+	_ = ctx
+	_ = app
+	_ = cfg
+	return nil
+}

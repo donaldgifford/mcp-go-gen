@@ -1,0 +1,10 @@
+Dockerfile
+Makefile
+cmd/minimal/main.go
+go.mod
+internal/mcpauth/auth.go
+internal/mcpserver/server.go
+internal/mcpserver/tools.go
+internal/observability/logging.go
+internal/observability/metrics.go
+internal/observability/tracing.go
