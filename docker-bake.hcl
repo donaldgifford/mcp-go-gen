@@ -41,3 +41,22 @@ target "ci" {
     "${IMAGE_REPO}:${IMAGE_TAG}",
   ]
 }
+
+# docker-metadata-action is the default target name that
+# docker/metadata-action injects tags/labels into via its bake-file
+# outputs. The release target inherits from it so the multi-arch
+# image gets the version/major.minor/latest tag set computed by the
+# workflow. Empty by design — fields come from the metadata file.
+target "docker-metadata-action" {}
+
+target "release" {
+  inherits   = ["docker-metadata-action"]
+  context    = "."
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64", "linux/arm64"]
+  args = {
+    VERSION = "${VERSION}"
+    COMMIT  = "${COMMIT}"
+  }
+  output = ["type=registry"]
+}
