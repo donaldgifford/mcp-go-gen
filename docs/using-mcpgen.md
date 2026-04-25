@@ -1,15 +1,15 @@
-# Using mcpgen — Walkthrough, Part 2
+# Using mcp-go-gen — Walkthrough, Part 2
 
-A hands-on guide for using mcpgen to generate MCP servers. Covers
+A hands-on guide for using mcp-go-gen to generate MCP servers. Covers
 each supported mode (new project vs embed), each supported auth
 scheme (none, bearer, OIDC, dynamic OIDC), and both backend-spec
 paths (inline HCL vs OpenAPI reference). Each section has a
 complete HCL example, a description of what the generator produces,
 and the deployment notes you need to actually ship the output.
 
-If you're trying to modify mcpgen itself, Part 1
-(`building-mcpgen.md`) is the right doc. This one is for service
-owners who want to *use* mcpgen.
+If you're trying to modify mcp-go-gen itself, Part 1
+(`building-mcp-go-gen.md`) is the right doc. This one is for service
+owners who want to *use* mcp-go-gen.
 
 <!--toc:start-->
 <!--toc:end-->
@@ -18,22 +18,22 @@ owners who want to *use* mcpgen.
 
 ```bash
 # Install the binary. `@latest` gets the newest; pin for CI.
-go install github.com/our-org/mcpgen/cmd/mcpgen@latest
+go install github.com/donaldgifford/mcp-go-gen/cmd/mcp-go-gen@latest
 
 # Sanity check
-mcpgen --version
+mcp-go-gen --version
 ```
 
 From any directory, scaffold a starter config:
 
 ```bash
-mcpgen init
+mcp-go-gen init
 # writes mcpgen.hcl in the current dir
 ```
 
 The starter file is deliberately minimal; you edit from there.
 
-## 2. Anatomy of an mcpgen Config
+## 2. Anatomy of an mcp-go-gen Config
 
 Every HCL file has the same top-level shape:
 
@@ -195,7 +195,7 @@ tool "create_rfc" {
 Generate:
 
 ```bash
-mcpgen generate --mode new --out ./rfc-api-mcp
+mcp-go-gen generate --mode new --out ./rfc-api-mcp
 cd rfc-api-mcp
 go mod tidy
 go build ./...
@@ -237,7 +237,7 @@ BACKEND_API_TOKEN=$(vault read -field=token /some/path) \
 ### 3.2 OpenAPI Reference Backend
 
 Use this when the backend API already has an OpenAPI 3.x spec.
-mcpgen reads the spec, pulls parameters and response shapes per
+mcp-go-gen reads the spec, pulls parameters and response shapes per
 operation, and generates the proxy accordingly.
 
 Example: a JSM-compatible API with a real OpenAPI spec at
@@ -347,7 +347,7 @@ same binary. Pick this when:
 
 ### 4.1 Prerequisites
 
-Your service's `main.go` needs a marker comment where mcpgen will
+Your service's `main.go` needs a marker comment where mcp-go-gen will
 insert its registration call:
 
 ```go
@@ -360,7 +360,7 @@ func main() {
     routes.Register(mux, cfg)
 
     // mcpgen:hook
-    // (mcpgen inserts mcpserver.Register here)
+    // (mcp-go-gen inserts mcpserver.Register here)
 
     srv := &http.Server{Addr: cfg.Addr, Handler: mux}
     if err := srv.ListenAndServe(); err != nil {
@@ -370,9 +370,9 @@ func main() {
 }
 ```
 
-If the marker is missing when you run `mcpgen generate --mode
+If the marker is missing when you run `mcp-go-gen generate --mode
 embed`, you'll get a clear error telling you where to put it.
-Don't try to work around this — the marker is how mcpgen knows
+Don't try to work around this — the marker is how mcp-go-gen knows
 where to insert safely.
 
 ### 4.2 HCL for Embed Mode
@@ -382,7 +382,7 @@ differences:
 
 1. No `proxy {}` block (embed tools call in-process services, not
    HTTP backends).
-2. Tool blocks have no `backend {}` block. Instead, mcpgen emits a
+2. Tool blocks have no `backend {}` block. Instead, mcp-go-gen emits a
    stub that calls a function you'll implement.
 
 Example: adding an MCP tool surface to an existing webhookd service.
@@ -424,7 +424,7 @@ tool "get_delivery" {
 ### 4.3 Generate
 
 ```bash
-mcpgen generate --mode embed --out ./internal/mcp --config ./mcpgen.hcl
+mcp-go-gen generate --mode embed --out ./internal/mcp --config ./mcpgen.hcl
 ```
 
 This writes:
@@ -470,12 +470,12 @@ func (s *Service) ListRecentDeliveries(
 ```
 
 Notice `EDIT THIS FILE` rather than `DO NOT EDIT`. This is the
-one generated file mcpgen creates but then hands off to you — it
+one generated file mcp-go-gen creates but then hands off to you — it
 won't overwrite it on subsequent runs. This is deliberate: the
 signatures are derived from your HCL, the bodies are yours.
 
 If you later change a tool's HCL in a way that changes the stub
-signature, mcpgen will refuse to regenerate over your edited file
+signature, mcp-go-gen will refuse to regenerate over your edited file
 and give you a diff to apply manually. Safer than silently
 destroying your implementation.
 
@@ -685,7 +685,7 @@ don't move.
 ### 6.1 Normal Workflow
 
 1. Edit `mcpgen.hcl`.
-2. Run `mcpgen generate --mode <new|embed> --out ...`.
+2. Run `mcp-go-gen generate --mode <new|embed> --out ...`.
 3. Run `go build ./...` to check.
 4. Commit both the HCL and the generated files.
 
@@ -696,7 +696,7 @@ generated code in sync" is one line:
 ```yaml
 - name: Regeneration drift check
   run: |
-    mcpgen generate --mode new --out .
+    mcp-go-gen generate --mode new --out .
     git diff --exit-code
 ```
 
@@ -706,17 +706,17 @@ accumulate.
 
 ### 6.2 Handling Generator Version Bumps
 
-When mcpgen itself releases a new version, your generated output
+When mcp-go-gen itself releases a new version, your generated output
 may change even with no HCL changes (because templates have been
 updated). The recommended workflow:
 
-1. Bump the mcpgen version (`@latest` or pin to the new version).
+1. Bump the mcp-go-gen version (`@latest` or pin to the new version).
 2. Regenerate.
 3. Review the diff — this is exactly what new generator behavior
    looks like.
 4. Commit.
 
-For large teams, we recommend pinning mcpgen at a version in a
+For large teams, we recommend pinning mcp-go-gen at a version in a
 dedicated `tools.go` file:
 
 ```go
@@ -725,7 +725,7 @@ dedicated `tools.go` file:
 
 package tools
 
-import _ "github.com/our-org/mcpgen/cmd/mcpgen"
+import _ "github.com/donaldgifford/mcp-go-gen/cmd/mcp-go-gen"
 ```
 
 And a `Makefile` target:
@@ -733,17 +733,17 @@ And a `Makefile` target:
 ```make
 .PHONY: gen
 gen:
-	go install github.com/our-org/mcpgen/cmd/mcpgen
-	mcpgen generate --mode new --out .
+	go install github.com/donaldgifford/mcp-go-gen/cmd/mcp-go-gen
+	mcp-go-gen generate --mode new --out .
 ```
 
-Bumping is then a single `go get -u github.com/our-org/mcpgen &&
+Bumping is then a single `go get -u github.com/donaldgifford/mcp-go-gen &&
 make gen` instead of a conversation about which version everyone
 has installed.
 
 ### 6.3 Testing the Generated Server
 
-You don't have to test the observability spine — mcpgen tests its
+You don't have to test the observability spine — mcp-go-gen tests its
 own templates. What you do have to test:
 
 - **For embed mode:** the stub implementations you filled in.
@@ -800,7 +800,7 @@ Tools that modify state need more care than read tools:
 - Consider adding a `dry_run` input that makes the tool compute
   its effect without committing.
 - Use OIDC with required scopes to gate access.
-- Log subject, action, and target in every invocation (mcpgen does
+- Log subject, action, and target in every invocation (mcp-go-gen does
   this automatically, but make sure your retention is set
   correctly for audit).
 
@@ -809,10 +809,10 @@ Tools that modify state need more care than read tools:
 - **OperationId is case-sensitive.** `getRfc` and `GetRFC` are
   different.
 - **Referenced schemas resolve recursively.** If your response
-  schema has `$ref`s to other schemas, mcpgen resolves them. If
+  schema has `$ref`s to other schemas, mcp-go-gen resolves them. If
   any `$ref` is broken or external-URL, generation fails.
 - **Authentication schemes in the OpenAPI spec are ignored.**
-  mcpgen uses the `proxy.auth` block for how to authenticate to
+  mcp-go-gen uses the `proxy.auth` block for how to authenticate to
   the backend, not whatever the spec declares. This is
   deliberate: the spec might describe "any auth" while your
   deployment requires a specific token.
@@ -820,7 +820,7 @@ Tools that modify state need more care than read tools:
 ### 7.4 Embed Mode: Don't Forget the Marker
 
 The `// mcpgen:hook` marker in your `main.go` has to exist before
-the first `mcpgen generate --mode embed`. If you forget, the
+the first `mcp-go-gen generate --mode embed`. If you forget, the
 error message tells you what to do:
 
 ```
@@ -831,20 +831,20 @@ want the MCP server to be registered:
 
     // mcpgen:hook
 
-Then re-run mcpgen.
+Then re-run mcp-go-gen.
 ```
 
 ### 7.5 What to Do When Something Goes Wrong
 
-- **`mcpgen generate` fails with a diagnostic pointing to an HCL
+- **`mcp-go-gen generate` fails with a diagnostic pointing to an HCL
   line:** fix the HCL. The diagnostic is right.
-- **`mcpgen generate` succeeds but `go build` fails in the
-  generated code:** this is an mcpgen bug. File an issue with the
+- **`mcp-go-gen generate` succeeds but `go build` fails in the
+  generated code:** this is an mcp-go-gen bug. File an issue with the
   HCL file attached and the `go build` error. Workaround: pin to
-  the previous mcpgen version.
+  the previous mcp-go-gen version.
 - **Generated code passes `go build` but the runtime server
   doesn't work:** usually a config problem (missing env var, wrong
-  endpoint URL). Check the logs first; mcpgen generates
+  endpoint URL). Check the logs first; mcp-go-gen generates
   informative slog lines.
 - **Claude Desktop can't connect:** check the `Host` header — the
   generated server validates against `WEBHOOK_MCP_ALLOWED_HOSTS`
@@ -863,7 +863,7 @@ Then re-run mcpgen.
 
 ## 9. What's Next
 
-If you need features mcpgen doesn't support yet, check the "Open
+If you need features mcp-go-gen doesn't support yet, check the "Open
 Questions" section of `DESIGN-0004` — many of the things people
 ask for are already on the v1.1 list. File an issue with your
 concrete use case; we'd rather expand the spec than have you
@@ -871,9 +871,9 @@ hand-roll around the generator.
 
 ## References
 
-- ADR-0001 — mcpgen architecture decisions
-- DESIGN-0004 — mcpgen detailed design
-- `docs/guide/building-mcpgen.md` — Part 1: how the generator works
+- ADR-0001 — mcp-go-gen architecture decisions
+- DESIGN-0004 — mcp-go-gen detailed design
+- `docs/guide/building-mcp-go-gen.md` — Part 1: how the generator works
 - `docs/guide/mcp-server-in-go.md` — the underlying Go MCP patterns
 - HCL2 reference: <https://github.com/hashicorp/hcl>
 - MCP specification: <https://modelcontextprotocol.io/specification>
