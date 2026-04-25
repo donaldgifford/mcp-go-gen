@@ -96,7 +96,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/donaldgifford/
+          images: ghcr.io/donaldgifford/mcp-go-gen
           tags: |
             type=semver,pattern={{version}},value=${{ needs.bump-version.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ needs.bump-version.outputs.tag }}
