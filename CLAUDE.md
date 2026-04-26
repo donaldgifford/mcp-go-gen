@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-IMPL-0001 Phases 1–7 complete — mcpgen has shipped the MVP generator. Both output modes (`--mode new`, `--mode embed`) are wired across all four auth schemes and both proxy-input flavors. Embed mode reads the user's module path via `scaffold.ModulePath`, emits only the `internal/` subset, and idempotently inserts `mcpserver.Register(ctx, app, cfg)` into the user's `main.go` at the `// mcpgen:hook` marker via `internal/dst`. `make ci` is green, `make release-check` validates the goreleaser config, and the README + IMPL-0001 Phase 7 track document the known limitations (real `Register` body, OpenAPI request-body params, path-rewrite for copied HCLs) as v1.x backlog.
+IMPL-0001 Phases 1–7 complete — mcpgen shipped the MVP generator and cut its first release as `v0.0.1` (PR #1 → main). Both output modes (`--mode new`, `--mode embed`) are wired across all four auth schemes and both proxy-input flavors. Embed mode reads the user's module path via `scaffold.ModulePath`, emits only the `internal/` subset, and idempotently inserts `mcpserver.Register(ctx, app, cfg)` into the user's `main.go` at the `// mcpgen:hook` marker via `internal/dst`. `make ci` is green, `make release-check` validates the goreleaser config, and the README + IMPL-0001 Phase 7 track document the known limitations (real `Register` body, OpenAPI request-body params, path-rewrite for copied HCLs) as v1.x backlog. Multi-arch container images publish to `ghcr.io/donaldgifford/mcp-go-gen` via the Docker job in the Release workflow.
 
 When implementing, follow the design documents in `docs/` rather than inventing a layout from scratch. The package-layout conventions below match IMPL-0001 Phase 1; don't rename dirs without updating the impl doc.
 
@@ -40,9 +40,22 @@ This project uses a `make`-driven workflow. Tool versions are pinned in `mise.to
 
 Running a single Go test within a package: `go test -v -race -run TestName ./path/to/pkg`.
 
-**Known inconsistencies in the scaffold** (worth fixing when touched, but don't go out of your way):
-- `.goreleaser.yml` still references `./cmd/forge` and a binary named `forge` — it was copied from another project and needs updating to `./cmd/mcp-go-gen` before a real release.
-- The `make run` target points at `./build/bin/repo-guardian` — same template-leftover issue.
+The repo was originally bootstrapped from another scaffold; treat any unfamiliar binary name, image name, bake target, or directory in CI/release config as suspect until verified. Two such leftovers (goreleaser cmd path, `make run` binary) were fixed pre-v0.0.1; two more (missing `release` bake target, malformed `images:` value) only surfaced post-merge when the v0.0.1 Docker job ran. `make release-check` does not validate workflow YAML or `docker-bake.hcl`, so green local checks are not sufficient — when touching `.goreleaser.yml`, `docker-bake.hcl`, `.github/workflows/release.yml`, or `.github/dependabot.yml`, audit for stale references.
+
+## Release pipeline
+
+`.github/workflows/release.yml` runs three jobs in series on every push to `main`:
+
+1. **bump-version** uses `jefflinse/pr-semver-bump` with `noop-labels: "dont-release"`. The PR labeler (`.github/labeler.yml` + `.github/workflows/pr-labels.yml`) requires every PR to carry one of `major | minor | patch | dont-release`; the `dont-release` label is the opt-out for infra/CI-only changes that must not bump a version. When skipped, `outputs.skipped == 'true'`.
+2. **release** is gated on `needs.bump-version.outputs.skipped != 'true'` and runs goreleaser with GPG signing (`GPG_PRIVATE_KEY`, `GPG_FINGERPRINT` repo secrets are required — without them the GPG import step fails and the release job aborts before goreleaser runs).
+3. **docker** is gated the same way and uses `docker/bake-action` with `targets: release` against `docker-bake.hcl`.
+
+`docker-bake.hcl` defines two targets:
+
+- `ci` — used by `.github/workflows/ci.yml` for sanity multi-arch builds with hardcoded tags.
+- `release` — multi-arch with `output = ["type=registry"]` so it pushes. **It inherits from a separate `docker-metadata-action` target which is intentionally empty.** That name is the default target `docker/metadata-action` injects tags/labels into via its `bake-file-tags` / `bake-file-labels` outputs; the inheritance is what wires the workflow's metadata-action result into the release build. Don't rename either target without also updating `release.yml`.
+
+The `metadata-action` `images:` input must be the full image name (`ghcr.io/donaldgifford/mcp-go-gen`). A trailing slash with no name renders broken tags like `ghcr.io/donaldgifford/:0.0.1` and bake fails late.
 
 ## Repo layout
 
