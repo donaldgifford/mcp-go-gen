@@ -38,6 +38,7 @@ created: 2026-04-27
 - [Testing Plan](#testing-plan)
 - [Dependencies](#dependencies)
 - [Open Questions](#open-questions)
+- [Resolved Open Questions](#resolved-open-questions)
 - [References](#references)
 <!--toc:end-->
 
@@ -137,24 +138,32 @@ Stand up the `demo/` directory and Compose stack with MCP boundary auth = `none`
 - [ ] Author `demo/compose.yaml` defining: top-level `name: mcpgen-demo`, `networks.default` as a user-defined bridge.
 - [ ] Service `demo-api`: `build: ./api`, env from `.env`, `healthcheck` hitting `/healthz`, no published ports.
 - [ ] Service `demo-mcp`: `build: ./mcp-server`, env passes `MCP_DEMO_API_TOKEN` from `.env`, `depends_on.demo-api.condition: service_healthy`, no published ports (resolved decision #4 in DESIGN-0005).
-- [ ] Service `mcp-inspector`: `image: ghcr.io/modelcontextprotocol/inspector:latest`, env autoload of the MCP URL, `ports: ["6274:6274"]`, `depends_on.demo-mcp.condition: service_started`.
+- [ ] Service `mcp-inspector`: `image: ghcr.io/modelcontextprotocol/inspector:latest`, `ports: ["6274:6274"]`, `depends_on.demo-mcp.condition: service_started`. **No env-var autoload** — the inspector is a UI tool; the user pastes the MCP URL (and bearer token in Phase 3, OIDC token in Phase 5) into its web form on first connect (Resolved OQ #4).
 - [ ] Author `demo/.env.example` with documented placeholders: `DEMO_BEARER_TOKEN=demo-secret-please-change`, optional `MCP_DEMO_API_TOKEN=${DEMO_BEARER_TOKEN}` (same value, different env names so each container gets the var it expects).
 - [ ] Add `demo/.env` to `.gitignore`.
 
 **Makefile and orchestration**
 
-- [ ] Add Makefile targets at the repo root:
-    - `demo-up` — `$(MAKE) build && ./build/bin/mcp-go-gen generate -c demo/mcpgen.hcl -o demo/mcp-server && cp demo/mcpgen.hcl demo/mcp-server/ && cd demo && docker compose up -d --build`.
+- [ ] Add Makefile targets at the repo root. `demo-up` declares `build` as a Make dependency (Resolved OQ #6) so a fresh clone runs end-to-end with one command:
+    - `demo-up: build` — `./build/bin/mcp-go-gen generate -c demo/mcpgen.hcl -o demo/mcp-server && cp demo/mcpgen.hcl demo/mcp-server/ && cd demo && docker compose up -d --build`.
     - `demo-down` — `cd demo && docker compose down -v`.
     - `demo-logs` — `cd demo && docker compose logs -f`.
     - `demo-rebuild` — `cd demo && docker compose down && $(MAKE) demo-up`.
     - `demo-clean` — `rm -rf demo/mcp-server` (idempotent; useful when changing HCL).
+    - `demo-test` — `cd demo/api && go test -race ./...`. Explicit because the demo API's `go.mod` boundary is invisible to a repo-root `go test ./...` (Resolved OQ #3 confirms this is intentional).
 - [ ] Each target prints the matching `log-<target>` banner used elsewhere in the Makefile.
+- [ ] Verify `make ci` at the repo root still passes after the demo lands — confirm `go test ./...` does not descend into `demo/api/` (it shouldn't, per the separate-module decision).
 
 **Documentation**
 
-- [ ] Author `demo/README.md`: prerequisites (Docker, `make build` first time), quickstart (`cp demo/.env.example demo/.env && make demo-up`), how to open the inspector at `localhost:6274`, what tools to expect, common failure modes (port conflicts, missing `.env`, generator not built), opt-in for publishing `demo-mcp:8090` to host.
+- [ ] Verify during Phase 2 implementation whether the inspector calls the MCP server from its **container backend** (Docker DNS works → paste `http://demo-mcp:8090/mcp`) or from the **browser** (needs the MCP port published to the host → paste `http://localhost:8090/mcp` and add `ports: ["8090:8090"]` to the `demo-mcp` service). The Phase 2 README and compose YAML follow whichever model the inspector actually uses.
+- [ ] Author `demo/README.md`: prerequisites (Docker, `make build` first time), quickstart (`cp demo/.env.example demo/.env && make demo-up`), how to open the inspector at `localhost:6274` and paste the MCP URL into its connect form on first use (exact URL determined by the verification above), what tools to expect, common failure modes (port conflicts, missing `.env`, generator not built).
 - [ ] Update top-level `README.md` to add a one-liner demo callout linking to `demo/README.md`.
+
+**Phase 1 follow-ups (gated on end-to-end verification — see Resolved Open Questions)**
+
+- [ ] **Tool result shape (Resolved OQ #1):** once Phase 2 is up and the inspector is calling Phase 1's GET tools end-to-end with text-shaped results, evaluate whether `tools.go.tmpl` should switch to mark3labs/mcp-go's structured-content helpers. Score on: helper API stability, inspector rendering improvement for JSON, decode-error fallback complexity. If yes, edit `tools.go.tmpl` and the Phase 1 golden fixtures in this same IMPL.
+- [ ] **Path-param substitution to runtime helper (Resolved OQ #2):** once Phase 2 confirms the inline `strings.NewReplacer` approach works for the demo's path-param tools, refactor to a runtime helper on `Backend` (e.g. `Backend.SubstitutePath(template string, params map[string]string) string`). Update `tools.go.tmpl` to emit calls into the helper instead of the inline literal; update `backend.go.tmpl` to define it; update Phase 1 golden fixtures.
 
 #### Success Criteria
 
@@ -177,7 +186,7 @@ Flip the MCP boundary from `none` to `bearer` and document inspector setup. No c
 - [ ] Edit `demo/mcpgen.hcl`: replace `auth { none {} }` with `auth { bearer { token_env = "MCP_BOUNDARY_TOKEN" } }`. Keep the `proxy { bearer { token_env = "MCP_DEMO_API_TOKEN" } }` block — the two tokens are unrelated and may have different values.
 - [ ] Update `demo/.env.example` to add `MCP_BOUNDARY_TOKEN=mcp-boundary-secret-please-change` and a comment distinguishing it from `DEMO_BEARER_TOKEN`.
 - [ ] Update `demo/compose.yaml` `demo-mcp.environment` to inject `MCP_BOUNDARY_TOKEN` from `.env`.
-- [ ] Update `demo/README.md` with a "Phase 1b: bearer-protected MCP boundary" section: how to configure the inspector to send the `Authorization` header (which inspector UI field, env var, or config file controls this — depends on Open Question #4).
+- [ ] Update `demo/README.md` with a "Phase 1b: bearer-protected MCP boundary" section: open the inspector UI, locate the headers/auth panel, paste `Authorization: Bearer <copy MCP_BOUNDARY_TOKEN value from .env>`, then connect (Resolved OQ #4: inspector takes the bearer token via UI paste, not env or config file).
 - [ ] Add a manual verification step: with `MCP_BOUNDARY_TOKEN` configured on the inspector side, the four tools list and call as before; with it removed or wrong, the inspector reports a 401-equivalent.
 - [ ] Confirm the generator's `bearer` auth template emits the expected 401 + `WWW-Authenticate: Bearer` on rejection (already covered by IMPL-0001 phase 4 tests; just verify against the demo).
 
@@ -242,8 +251,8 @@ Adds the `/api/oauth2flow` tree to the demo API, an OIDC issuer service to compo
 
 **MCP wiring**
 
-- [ ] Update `demo/mcpgen.hcl`: split `auth { bearer {…} }` into a separate config or document that phase 2 uses `auth { oidc { issuer = "…" audience = "…" } }`. The proxy block stays as-is (bearer to API); the boundary auth swaps in OIDC.
-- [ ] Decide: does the MCP itself proxy the OIDC token through to `/api/oauth2flow`, or use a separate service-account bearer for the proxy call? In v1 we have one proxy bearer; the simpler path is a separate static service-account token validated by the API as a bearer (treating `/api/oauth2flow` as bearer-protected from the MCP's POV, and the OIDC verification lives only at the MCP boundary). Document the choice clearly.
+- [ ] Update `demo/mcpgen.hcl`: change `auth { bearer {…} }` to `auth { oidc { issuer = "…" audience = "…" } }` so the MCP boundary validates inspector-supplied OIDC JWTs. The proxy block stays as-is (static service-account bearer to API).
+- [ ] Wire the API side per Resolved OQ #7: the MCP forwards a **separate static service-account bearer** to `/api/oauth2flow` (not the user's JWT), so `/api/oauth2flow` is in practice bearer-protected from the MCP's POV. The API still validates the same incoming string against the issuer's JWKS so the OIDC code path is exercised — the service-account token is itself a JWT issued by the test issuer with the right `aud`. Document this clearly in `demo/README.md` so the storytelling distinction (OIDC at the boundary, separate identity for proxy) is explicit.
 
 **Documentation and verification**
 
@@ -305,21 +314,25 @@ External:
 
 ## Open Questions
 
-1. **Phase 1 — response shape returned to the MCP client.** The generator's existing `mcp.NewToolResultText(string(body))` flattens the upstream JSON into a string the inspector renders as a code block. Mark3labs's mcp-go also exposes `mcp.NewToolResultJSON` (or equivalent structured-content helpers — name TBD pending a check of the SDK's current API) which the inspector could render structured. Choosing structured may be more useful for inspector users but ties the generator to a specific SDK shape. **Default proposal:** stay with `NewToolResultText` for v1; revisit if/when mcp-go's structured-content helpers stabilize.
+_None remaining. See Resolved Open Questions below._
 
-2. **Phase 1 — path-param substitution location.** Two options: (a) substitute at template-emit time using Go template logic, producing a `strings.NewReplacer` literal in the generated code; (b) emit a tiny helper function once per tool that does substitution at runtime. (a) is faster at runtime and easier to read in the diff; (b) is easier to extend with escaping/validation later. **Default proposal:** (a) for v1.
+## Resolved Open Questions
 
-3. **Phase 2 — demo API as a separate Go module.** The plan above gives `demo/api/` its own `go.mod` so it can have a different dep set without polluting the generator's module. Alternative: keep it in the main module under `demo/api/`, gated by a build tag. Separate-module is cleaner but means `make ci` at the repo root needs to know not to walk into `demo/`, and a developer running `go test ./...` from the repo root won't pick up demo API tests. **Default proposal:** separate module, Makefile `demo-test` target for explicit invocation; CI ignores `demo/`.
+1. **Phase 1 — response shape returned to the MCP client.** Stay with `mcp.NewToolResultText(string(body))` for the initial implementation so the simplest path is verified end-to-end first. After Phase 2 stands the harness up and the inspector confirms tool calls return real upstream JSON as text, evaluate whether to switch to mark3labs/mcp-go's structured-content helpers (revisit task tracked at the end of Phase 2). If the revisit accepts, the change lands inside this same IMPL — Phase 1's `tools.go.tmpl` and golden fixtures get updated then. *Resolved 2026-04-27.*
 
-4. **Phase 3 — Inspector bearer setup mechanism.** I have not verified what the official MCP Inspector accepts as configuration for an `Authorization: Bearer` header on outgoing MCP requests. Options seen in similar tools include: (a) UI-side input field, (b) env var like `MCP_AUTH_TOKEN`, (c) a config file mounted at a known path, (d) a query string param. The phase-3 task list assumes one of these is available; verifying which is a prerequisite to writing the README walkthrough. **Action:** confirm against `github.com/modelcontextprotocol/inspector` README before starting Phase 3 tasks.
+2. **Phase 1 — path-param substitution location.** Implement option (a) for the initial pass: emit `strings.NewReplacer(...).Replace(...)` literals at template-emit time so the generated code reads exactly like what a human would write per tool, with no extra indirection through `Backend`. Once Phase 2 verifies the demo's path-param tools (`get_noauth_record`, `get_bearer_record`) work end-to-end, refactor to option (b): a runtime helper on `Backend` (e.g. `Backend.SubstitutePath`) that the per-tool generated code calls into. The migration lands inside this same IMPL via the Phase 2 follow-up task; rationale is that the helper-based approach is easier to extend (validation, custom escaping, slash handling) but only worth introducing once the inline approach is proven. *Resolved 2026-04-27.*
 
-5. **Phase 2 — health check for `demo-mcp`.** The generated MCP server doesn't currently expose a `/healthz` endpoint, only `/metrics` (when enabled). Compose's `depends_on.demo-mcp.condition: service_healthy` would therefore need a healthcheck added either to the HCL schema (long path) or by hitting `/metrics` with a `200`-or-better status (works today). **Default proposal:** use `service_started` for inspector→demo-mcp, and let the inspector retry on connection refusals. If retries are flaky, add a `healthcheck` against `/metrics` as a workaround.
+3. **Phase 2 — demo API as a separate Go module.** `demo/api/` declares its own `go.mod` (`github.com/donaldgifford/mcp-go-gen/demo/api`). Demo-only deps stay out of the generator's `go.sum`, license-check, govulncheck, and Trivy scans. CI walks at the repo root (`go test ./...`) skip `demo/`; a `make demo-test` target exists for explicit demo-side test runs. Justification: the demo is a separate product surface and its dep choices should not affect generator releases or security-scan signal. *Resolved 2026-04-27.*
 
-6. **Makefile `demo-up` — `mcp-go-gen` binary source.** The plan calls `./build/bin/mcp-go-gen` (so `make build` is a prereq). Alternative: `go run ./cmd/mcp-go-gen` (works without `make build` but slower per-invocation). **Default proposal:** require `make build` first; `demo-up` declares `build` as a Make dependency so it's transparent.
+4. **Phase 3/5 — Inspector authentication setup mechanism.** The official MCP Inspector accepts auth credentials (bearer tokens for Phase 3, OAuth/OIDC tokens for Phase 5) via its **web UI**, not via env vars or config files. After `make demo-up`, the user opens `http://localhost:6274`, locates the inspector's headers/auth panel, and pastes the token there before connecting. The compose YAML therefore has no auth-related env-var injection on the `mcp-inspector` service for any phase. A separate verification step in Phase 2 is needed to determine whether the inspector calls the MCP server from its container backend (Docker DNS works → URL is `http://demo-mcp:8090/mcp`) or from the browser (needs port publishing → URL is `http://localhost:8090/mcp`); the README and compose YAML follow whichever model the inspector actually uses. *Resolved 2026-04-27.*
 
-7. **Phase 5 — OIDC token flow through the proxy.** If the MCP forwards the inspector's user JWT to `/api/oauth2flow`, the generator needs an OIDC-aware `proxy` block (token-from-context). Otherwise the MCP uses a separate service-account bearer. Plan above takes the second path to avoid extending the generator. **Action:** confirm during Phase 5 design refinement whether token-forwarding is a goal.
+5. **Phase 2 — health check for `demo-mcp`.** Use `depends_on.demo-mcp.condition: service_started` and rely on the inspector to retry on connection-refused. The generated MCP server does not currently expose a `/healthz`; using `/metrics` as a stand-in healthcheck would tie the demo to having metrics enabled forever, which is a worse trade than asking the user to refresh the inspector once if the first connect lands too early. Adding a real `/healthz` endpoint to the generated MCP server is tracked as a v1.x backlog item in IMPL-0001 Phase 7; once that lands, this demo flips to `service_healthy` against `/healthz`. *Resolved 2026-04-27.*
 
-8. **`demo-down -v` removing volumes by default.** Phase 2 currently has no volumes, so `-v` is a no-op. Phase 5's issuer service may want a volume for its config or signing key. **Default proposal:** `demo-down` strips volumes (`-v`) since the demo is meant to be regen-from-scratch; document a `demo-stop` target without `-v` if a non-destructive stop is wanted later.
+6. **Makefile `demo-up` — `mcp-go-gen` binary source.** Use the built binary at `./build/bin/mcp-go-gen` and declare `build` as a Make dependency (`demo-up: build`) so a fresh clone runs end-to-end with one command. Rationale: the demo doubles as a "this is what you actually run after install" walkthrough, so using `go run` would obscure the real deploy path. Speed difference is negligible on first run and disappears on subsequent runs. *Resolved 2026-04-27.*
+
+7. **Phase 5 — OIDC token flow through the proxy.** Phase 5 ships option (b): the MCP boundary validates inspector-supplied OIDC JWTs, and the proxy uses a **separate static service-account bearer** to call `/api/oauth2flow` (env-var-driven, like Phase 1's proxy bearer). The API still validates the upstream token against the issuer's JWKS, so the OIDC verification code path is exercised — but the demo is honest that two unrelated identities are in play. End-to-end identity propagation (option a — forwarding the user JWT to the upstream) requires extending the generator's HCL schema and proxy template to support `token_source = "request_context"` semantics; that work is added to the IMPL-0001 v1.x backlog and lands in a follow-up IMPL. *Resolved 2026-04-27.*
+
+8. **`demo-down -v` removing volumes by default.** `make demo-down` runs `docker compose down -v` — clean shutdown that strips volumes alongside containers and networks. The demo is meant to be regen-from-scratch; persisting state across `down`/`up` cycles is not a goal. No `demo-stop` non-destructive variant for now. If a phase 5 volume (issuer signing key, config) ever benefits from being preserved, ship `demo-stop` then with the volume's name explicitly documented; until then, the simpler single-target surface wins. *Resolved 2026-04-27.*
 
 ## References
 

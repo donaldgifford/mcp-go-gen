@@ -220,14 +220,11 @@ Phase 1a emits four `GET` tools because the generator's proxy implementation lan
 
 ### Inspector service
 
-`ghcr.io/modelcontextprotocol/inspector:latest`. The floating tag is fine for a manually-run demo; the harness is not yet referenced from CI so reproducibility-by-digest isn't a constraint. Configured via env to autoload the demo MCP URL:
+`ghcr.io/modelcontextprotocol/inspector:latest`. The floating tag is fine for a manually-run demo; the harness is not yet referenced from CI so reproducibility-by-digest isn't a constraint. The inspector is a UI tool — the user pastes the MCP server URL (and any auth credentials) into its web form on first connect. There is no env-var autoload. Compose definition is therefore minimal:
 
 ```yaml
 inspector:
   image: ghcr.io/modelcontextprotocol/inspector:latest
-  environment:
-    MCP_SERVER_URL: http://demo-mcp:8090/mcp
-    MCP_TRANSPORT: streamable-http
   ports:
     - "6274:6274"
   depends_on:
@@ -235,7 +232,7 @@ inspector:
       condition: service_started
 ```
 
-The user opens `http://localhost:6274` and the inspector talks to `demo-mcp` over the internal bridge. No `host.docker.internal`, no port forwarding gymnastics — that's the whole reason for putting the inspector inside the same Compose network.
+The user opens `http://localhost:6274` and pastes in the MCP URL. The exact URL depends on whether the inspector calls the MCP from its container backend (Docker DNS resolves `http://demo-mcp:8090/mcp`) or from the browser (needs `demo-mcp:8090` published to the host as `http://localhost:8090/mcp`); the IMPL doc tracks this as a Phase 2 verification step. Either way, putting all three services on the same Compose network removes the `host.docker.internal` / loopback ambiguity that broke ad-hoc inspector runs.
 
 ### Phase 1 vs Phase 2 scope
 
