@@ -30,6 +30,7 @@ created: 2026-04-27
 - [Data Model](#data-model)
 - [Testing Strategy](#testing-strategy)
 - [Migration / Rollout Plan](#migration--rollout-plan)
+- [Resolved Decisions](#resolved-decisions)
 - [Open Questions](#open-questions)
 - [References](#references)
 <!--toc:end-->
@@ -61,6 +62,8 @@ A `demo/` directory and a Docker Compose stack that stand up an end-to-end mcp-g
 mcp-go-gen produces a runnable MCP server with HTTP transport (`server.NewStreamableHTTPServer`) mounted at `Server.EndpointPath` (default `/mcp`) on `Server.ListenerAddr` (default `:8090`). The generated `internal/mcpserver/backend.go` carries an `http.Client` plus base URL and optional bearer token; `internal/mcpserver/tools.go` defines one handler per HCL tool. **Today the tool handler body is a stub that returns `"<tool>: ok"`** — the actual `Backend.Client.Do` call is documented in CLAUDE.md and the README as v1.x backlog. This design assumes that gap closes (see [Open Questions](#open-questions) for the path forward); without it, the demo can show transport, tool listing, and auth handshakes but every tool call returns the canned stub instead of API data.
 
 The MCP Inspector (`github.com/modelcontextprotocol/inspector`) is a TypeScript app that ships as a Docker image. It speaks Streamable HTTP transport against a configured MCP server URL and exposes a UI on a fixed port (default 6274). Network failures from the user's manual run trace to inspector-in-container reaching back to MCP-on-host without `host.docker.internal` or a shared bridge — solved here by putting both on a user-defined Compose network and addressing the MCP by service hostname.
+
+**Resolved approach for the proxy gap:** the generator gains a minimal GET-only proxy implementation in `tools.go.tmpl` (path-param substitution, JSON passthrough, no request body), tracked as a separate IMPL doc. POST/PUT tooling in this demo grows alongside the generator's write-mutation support — the demo is the gating consumer, not a workaround. The harness explicitly does not hand-edit generated files.
 
 ## Detailed Design
 
@@ -155,7 +158,8 @@ server {
   endpoint_path = "/mcp"
 }
 
-# Phase 1: MCP boundary auth is `none` to keep inspector setup trivial.
+# Phase 1a: MCP boundary auth is `none` to keep inspector setup trivial.
+# Phase 1b swaps `none` for `bearer` once 1a is end-to-end green.
 # Phase 2 swaps in `oidc` so the inspector exercises a real flow.
 auth {
   none {}
@@ -212,11 +216,11 @@ tool "get_bearer_record" {
 
 The single `proxy.bearer` token is forwarded on every upstream request. The `/api/noauth/*` handlers ignore the `Authorization` header; the `/api/bearer/*` handlers compare it against `DEMO_BEARER_TOKEN`. Both env vars resolve to the **same string** in `demo/.env`, exposed as `MCP_DEMO_API_TOKEN` to the MCP container and `DEMO_BEARER_TOKEN` to the API container.
 
-Phase 1 emits four `GET` tools because the proxy implementation likely lands GET-first (see [Open Questions](#open-questions)). `POST`/`PUT` tools follow once request-body marshaling is wired.
+Phase 1a emits four `GET` tools because the generator's proxy implementation lands GET-first (see [Background](#background) — Resolved approach for the proxy gap). `POST`/`PUT` tools follow once request-body marshaling is wired in the generator.
 
 ### Inspector service
 
-`ghcr.io/modelcontextprotocol/inspector:latest` (or a pinned tag — TBD per Open Questions). Configured via env to autoload the demo MCP URL:
+`ghcr.io/modelcontextprotocol/inspector:latest`. The floating tag is fine for a manually-run demo; the harness is not yet referenced from CI so reproducibility-by-digest isn't a constraint. Configured via env to autoload the demo MCP URL:
 
 ```yaml
 inspector:
@@ -235,20 +239,24 @@ The user opens `http://localhost:6274` and the inspector talks to `demo-mcp` ove
 
 ### Phase 1 vs Phase 2 scope
 
-| Concern             | Phase 1                                       | Phase 2                                      |
-| ---                 | ---                                           | ---                                          |
-| API auth trees      | `/api/noauth`, `/api/bearer`                  | adds `/api/oauth2flow`                       |
-| MCP boundary auth   | `none`                                        | switches to `oidc` against test issuer       |
-| Proxy auth          | bearer (same token, same env)                 | adds OIDC-derived bearer for oauth2flow tree |
-| Compose services    | `demo-api`, `demo-mcp`, `mcp-inspector`       | adds `demo-idp` (Keycloak or dex)            |
-| Tools shipped       | 4 GET tools (list/get × noauth/bearer)        | adds POST/PUT tools and oauth2flow GETs      |
-| Makefile            | `demo-up`, `demo-down`, `demo-logs`, `demo-rebuild` | unchanged                              |
+Phase 1 splits into two sub-steps to keep iteration cheap. 1a stands the harness up end-to-end with the simplest possible MCP boundary; 1b layers MCP boundary auth on the same harness without touching API or compose topology.
+
+| Concern             | Phase 1a                                      | Phase 1b                                      | Phase 2                                      |
+| ---                 | ---                                           | ---                                           | ---                                          |
+| API auth trees      | `/api/noauth`, `/api/bearer`                  | unchanged                                     | adds `/api/oauth2flow`                       |
+| MCP boundary auth   | `none`                                        | `bearer`                                      | `oidc` against test issuer                   |
+| Proxy auth (MCP→API)| bearer (single token, same env)               | unchanged                                     | adds OIDC-derived bearer for oauth2flow tree |
+| Compose services    | `demo-api`, `demo-mcp`, `mcp-inspector`       | unchanged                                     | adds `demo-idp` (issuer TBD)                 |
+| Tools shipped       | GET tools as proxy support lands              | unchanged                                     | adds POST/PUT and oauth2flow GETs            |
+| Makefile            | `demo-up`, `demo-down`, `demo-logs`, `demo-rebuild` | unchanged                               | unchanged                                    |
+
+The "tools shipped" row is intentionally vague: the demo's HCL gains tools as the generator gains support for the matching HTTP verbs. GET-only at first; POST/PUT once generator write-mutation support lands. The demo and the generator advance together rather than the demo working around generator gaps.
 
 ### Networking and how Inspector reaches the MCP server
 
 The original network failure (inspector can't reach the MCP server) is a "containers on different networks" problem. Putting all three services on the named bridge `mcpgen-demo` and addressing by Compose service name (`demo-api`, `demo-mcp`) eliminates the host-vs-container-loopback ambiguity. The only port published to the host is the inspector UI; the MCP and API never need to be reachable from outside the network for the demo to work.
 
-If the user wants to also `curl` the MCP from the host (for debugging), a `ports: ["8090:8090"]` line on `demo-mcp` is the toggle — documented in the README but off by default to keep the Compose surface minimal.
+If the user wants to also `curl` the MCP from the host (for debugging), a `ports: ["8090:8090"]` line on `demo-mcp` is the toggle — documented in `demo/README.md` but off by default to keep the Compose surface minimal.
 
 ## API / Interface Changes
 
@@ -318,24 +326,27 @@ A future IMPL doc will promote (1)–(5) to a Go test that drives the inspector'
 This is a greenfield directory; no migration. Rollout order:
 
 1. Land the design (this doc, status `Approved`).
-2. Open an IMPL doc for phase 1 covering: `demo/api/`, `demo/mcpgen.hcl`, `demo/compose.yaml`, Makefile targets, `.gitignore` updates, `demo/README.md` walkthrough.
-3. Resolve the proxy stub gap (Open Question #1) before phase 1 IMPL closes — without it the demo's tool calls return canned text rather than API data.
-4. Phase 2 IMPL doc adds the OIDC test issuer and `oauth2flow` tree.
+2. Open an IMPL doc for the **generator-side proxy work**: minimal GET-only `Backend.Client.Do` implementation in `tools.go.tmpl`, path-param substitution, JSON passthrough. This unblocks every demo tool that issues a real HTTP call.
+3. Open an IMPL doc for **demo phase 1a**: `demo/api/`, `demo/mcpgen.hcl` (auth = `none`, GET tools only), `demo/compose.yaml`, Makefile targets, `.gitignore` updates, `demo/README.md` walkthrough.
+4. **Phase 1b IMPL**: flip MCP boundary auth from `none` to `bearer` in `demo/mcpgen.hcl`, document inspector-side bearer setup, no compose topology change.
+5. **Generator IMPL** for write-mutation tools (POST/PUT request body marshaling). Demo phase 1c adds matching POST/PUT tools as those land.
+6. **Phase 2 IMPL** adds the OIDC test issuer service, `/api/oauth2flow` tree, OIDC boundary auth, and oauth2flow tools.
 
-Each IMPL is its own PR. Phase 1 and the proxy work can land in parallel branches and merge in either order; the demo's `make demo-up` simply prints stub responses until proxy work is in.
+Each IMPL is its own PR. Steps (2) and (3) can run in parallel branches; (3) merges first as a no-op demo (compose comes up, MCP starts, inspector connects, tools list is empty or stub-only) and then (2) lights up the actual GET tools when its template change merges.
+
+## Resolved Decisions
+
+The following were open during the first design pass and have since been settled. Recorded here so the doc reads coherently for first-time readers without losing the audit trail.
+
+1. **Proxy gap closure** — Option C (minimal GET-only proxy in `tools.go.tmpl`), tracked as a separate IMPL doc. The demo evolves with the generator: POST/PUT tools land in the demo as the generator gains write-mutation support. Hand-editing generated trees is explicitly rejected.
+2. **Inspector image tag** — `:latest`. Reproducibility-by-digest isn't a constraint until the harness is referenced from CI.
+3. **MCP boundary auth** — `none` first (phase 1a) so the harness goes green end-to-end before any auth complications, then `bearer` (phase 1b) using the existing harness without compose-topology changes. OIDC defers to phase 2.
+4. **Compose port publishing** — internal-only by default; one-line `ports:` opt-in documented in `demo/README.md` for `curl`-from-host debugging.
+5. **Store concurrency** — `sync.RWMutex` over a `map[string]Record`. Sufficient for single-user inspector load; not worth optimizing further.
 
 ## Open Questions
 
-1. **How does the proxy stub gap get closed?** The generator's `tools.go.tmpl` currently emits `mcp.NewToolResultText("<tool>: ok")` instead of issuing the upstream request. Options:
-   - **A. Implement in the generator now** (extend `tools.go.tmpl` to emit `Backend.Client.Do` plus path-param substitution and result marshaling). Right answer architecturally; biggest scope.
-   - **B. Hand-edit the generated tree post-generation in `make demo-up`** (a `sed` or patch step). Fastest path to a working demo; sets a bad precedent and breaks regen idempotency.
-   - **C. Implement minimal GET-only proxy in the generator** (path-param substitution + JSON passthrough, no request body). Fits phase 1's GET-only tool set; defers POST/PUT marshaling to a follow-up.
-   - **Recommendation:** C, tracked as a separate IMPL doc that this design depends on.
-2. **Inspector image tag** — `:latest` vs a pinned digest. `:latest` is fine for a manual demo; pin once the demo is referenced from CI.
-3. **MCP boundary auth in phase 1** — `none` (proposed) keeps inspector setup zero-config. `bearer` would exercise more code at a small UX cost. Pick one.
-4. **OAuth2 issuer for phase 2** — Keycloak, dex, or a hand-rolled minimal JWKS server. Keycloak is heaviest but most representative of real deployments; dex is lighter; hand-rolled is smallest. Decide as part of phase 2 design refinement.
-5. **Compose port publishing** — should `demo-mcp:8090` be exposed to the host by default for debugging, or strictly on the internal network? Proposed: internal-only, with a documented one-line opt-in.
-6. **Store concurrency model** — `sync.RWMutex` is sufficient for the demo's load profile (single user via inspector). No need for sharding or per-record locks.
+1. **OAuth2 issuer for phase 2** — Keycloak, dex, or a hand-rolled minimal JWKS server. Keycloak is heaviest but most representative of real deployments and is already familiar; the team's experience with Keycloak automation has not been pleasant. Dex is unfamiliar and worth investigating (lighter, simpler bootstrap, fewer moving parts). Decision deferred to the phase 2 design refinement; investigation is a phase 2 IMPL prerequisite.
 
 ## References
 
