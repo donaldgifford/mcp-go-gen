@@ -16,7 +16,7 @@ This is the IMPL-0002 deliverable. See:
 | Path                | What it is                                                   |
 | ---                 | ---                                                          |
 | `api/`              | The minimal Go HTTP API (separate Go module). Five seed records, three auth trees (`/api/noauth`, `/api/bearer`, `/api/oauth2flow`); phase 1 wires the first two. |
-| `mcpgen.hcl`        | The HCL spec the demo MCP server is generated from. Auth = `none` in phase 1a. |
+| `mcpgen.hcl`        | The HCL spec the demo MCP server is generated from. Auth = `bearer` (phase 1b) — the inspector pastes a matching `Authorization: Bearer …` before connecting. |
 | `mcp-server/`       | Generated each `make demo-up` from `mcpgen.hcl`. **Gitignored** — never edit by hand. |
 | `compose.yaml`      | Three services (`demo-api`, `demo-mcp`, `mcp-inspector`) on one bridge. |
 | `.env.example`      | Template for `demo/.env` (copy, edit, never commit).         |
@@ -24,7 +24,7 @@ This is the IMPL-0002 deliverable. See:
 ## Quickstart
 
 ```bash
-# 1. Copy the env template and edit if you want a non-default token.
+# 1. Copy the env template and edit if you want non-default tokens.
 cp demo/.env.example demo/.env
 
 # 2. Bring it up. Generates the MCP server tree, builds all three
@@ -35,18 +35,41 @@ make demo-up
 open http://localhost:6274
 ```
 
-In the inspector UI:
+In the inspector UI (Phase 1b — MCP boundary auth = `bearer`):
 
-1. Connect to the demo MCP server. **Verify which URL form works for
+1. Locate the inspector's headers/auth panel **before** connecting.
+   Add a request header:
+
+   ```
+   Authorization: Bearer <copy MCP_BOUNDARY_TOKEN value from demo/.env>
+   ```
+
+   The MCP server itself reads `MCP_BOUNDARY_TOKEN` from its container
+   env (injected by `compose.yaml` from `demo/.env`) and accepts that
+   one value. Without a matching header the MCP server rejects the
+   connection at its middleware before the tool handler runs.
+2. Connect to the demo MCP server. **Verify which URL form works for
    your inspector build** — see [Inspector URL caveat](#inspector-url-caveat)
    below.
-2. The tools list should show four tools:
+3. The tools list should show four tools:
    `list_noauth_records`, `get_noauth_record`,
    `list_bearer_records`, `get_bearer_record`.
-3. Call `list_noauth_records` (no input). Expect a JSON list of the
+4. Call `list_noauth_records` (no input). Expect a JSON list of the
    five seed records.
-4. Call `get_bearer_record` with `id=rec-003`. Expect that single
+5. Call `get_bearer_record` with `id=rec-003`. Expect that single
    record returned as JSON.
+
+To verify the boundary itself: clear the `Authorization` header (or
+paste a wrong value) and reconnect — the inspector should surface a
+401-shaped error before any tool list call lands. This exercises the
+generator's bearer auth middleware (covered by IMPL-0001 phase 4
+golden tests).
+
+> **Two perimeters, two tokens.** `MCP_BOUNDARY_TOKEN` gates
+> inspector → MCP. `DEMO_BEARER_TOKEN` (mirrored to demo-mcp as
+> `MCP_DEMO_API_TOKEN`) gates MCP → `/api/bearer/*`. Either can rotate
+> independently. They default to different values in `.env.example`
+> for that reason.
 
 ```bash
 # Tail the stack logs to see what's happening.
@@ -73,12 +96,9 @@ This trade-off is documented in IMPL-0002 Resolved OQ #4.
 
 ## What works today vs. backlog
 
-- **Today (phase 1a):** stack starts, inspector connects, four GET
-  tools call the API and return real JSON record data via the
-  generator's GET-proxy template (IMPL-0002 phase 1).
-- **Phase 1b (next):** swap MCP boundary auth from `none` to `bearer`
-  in `mcpgen.hcl`. The inspector picks up an extra step: paste an
-  `Authorization: Bearer …` header in its UI before connecting.
+- **Today (phases 1a + 1b):** stack starts, inspector connects with a
+  bearer header, four GET tools call the API and return real JSON
+  record data. MCP boundary auth = `bearer` (IMPL-0002 phases 1–3).
 - **Phase 1c:** POST/PUT tools added to `mcpgen.hcl` once generator
   write-mutation support lands.
 - **Phase 2:** OAuth2/OIDC flow with a test issuer service. Adds
@@ -92,6 +112,7 @@ This trade-off is documented in IMPL-0002 Resolved OQ #4.
 | `make demo-up` fails with "no such file or directory" near `build/bin/mcp-go-gen` | The Makefile's `build` dep didn't run. | `make build && make demo-up`                       |
 | Port 6274 already in use                             | Another inspector / app on that port.                   | `lsof -i :6274` — kill or change the host port in `compose.yaml`. |
 | Inspector shows "connection refused" on first connect | Browser → container path; needs port publishing.        | Uncomment `ports: ["8090:8090"]` on `demo-mcp` and rebuild. |
+| Inspector shows 401 / "unauthorized" on the tools list | Missing or wrong `Authorization: Bearer` header in the inspector's headers panel (Phase 1b). | Copy `MCP_BOUNDARY_TOKEN` value from `demo/.env` into the inspector and reconnect. |
 | Tool calls return `"<tool>: ok"`                     | You're on a generator commit before IMPL-0002 phase 1.  | `git pull` and `make demo-rebuild`.                |
 | `make ci` fails after editing `demo/api/`            | Something in `demo/api/` started failing repo-root tests. | The demo's separate `go.mod` should keep CI clean — investigate the actual failure. |
 

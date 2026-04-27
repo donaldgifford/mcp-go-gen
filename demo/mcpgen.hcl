@@ -23,11 +23,13 @@ server {
     }
   }
 
-  # Phase 1a: MCP boundary auth is `none` so the inspector connects with
-  # zero config. Phase 1b (IMPL-0002) flips this to `bearer`; Phase 2
-  # swaps in `oidc`.
+  # Phase 1b: MCP boundary auth is `bearer`. The inspector must paste an
+  # Authorization: Bearer <MCP_BOUNDARY_TOKEN> header into its UI before
+  # connecting. Phase 2 swaps this for `oidc` against a test issuer.
   auth {
-    none {}
+    bearer {
+      tokens_env = "MCP_BOUNDARY_TOKEN"
+    }
   }
 }
 

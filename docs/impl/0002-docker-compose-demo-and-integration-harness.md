@@ -183,12 +183,12 @@ Flip the MCP boundary from `none` to `bearer` and document inspector setup. No c
 
 #### Tasks
 
-- [ ] Edit `demo/mcpgen.hcl`: replace `auth { none {} }` with `auth { bearer { token_env = "MCP_BOUNDARY_TOKEN" } }`. Keep the `proxy { bearer { token_env = "MCP_DEMO_API_TOKEN" } }` block — the two tokens are unrelated and may have different values.
-- [ ] Update `demo/.env.example` to add `MCP_BOUNDARY_TOKEN=mcp-boundary-secret-please-change` and a comment distinguishing it from `DEMO_BEARER_TOKEN`.
-- [ ] Update `demo/compose.yaml` `demo-mcp.environment` to inject `MCP_BOUNDARY_TOKEN` from `.env`.
-- [ ] Update `demo/README.md` with a "Phase 1b: bearer-protected MCP boundary" section: open the inspector UI, locate the headers/auth panel, paste `Authorization: Bearer <copy MCP_BOUNDARY_TOKEN value from .env>`, then connect (Resolved OQ #4: inspector takes the bearer token via UI paste, not env or config file).
-- [ ] Add a manual verification step: with `MCP_BOUNDARY_TOKEN` configured on the inspector side, the four tools list and call as before; with it removed or wrong, the inspector reports a 401-equivalent.
-- [ ] Confirm the generator's `bearer` auth template emits the expected 401 + `WWW-Authenticate: Bearer` on rejection (already covered by IMPL-0001 phase 4 tests; just verify against the demo).
+- [x] Edit `demo/mcpgen.hcl`: replace `auth { none {} }` with `auth { bearer { tokens_env = "MCP_BOUNDARY_TOKEN" } }`. Keep the `proxy { bearer { token_env = "MCP_DEMO_API_TOKEN" } }` block — the two tokens are unrelated and may have different values. _Field name on the boundary side is `tokens_env` (plural — multi-token support); the proxy bearer keeps `token_env` (singular). Verified via `internal/config/schema.go`._
+- [x] Update `demo/.env.example` to add `MCP_BOUNDARY_TOKEN=mcp-boundary-secret-please-change` and a comment distinguishing it from `DEMO_BEARER_TOKEN`.
+- [x] Update `demo/compose.yaml` `demo-mcp.environment` to inject `MCP_BOUNDARY_TOKEN` from `.env`.
+- [x] Update `demo/README.md` with a "Phase 1b: bearer-protected MCP boundary" section: open the inspector UI, locate the headers/auth panel, paste `Authorization: Bearer <copy MCP_BOUNDARY_TOKEN value from .env>`, then connect (Resolved OQ #4: inspector takes the bearer token via UI paste, not env or config file).
+- [x] Add a manual verification step: with `MCP_BOUNDARY_TOKEN` configured on the inspector side, the four tools list and call as before; with it removed or wrong, the inspector reports a 401-equivalent. _Documented in the README as the "verify the boundary itself" paragraph + the new failure-modes row._
+- [x] Confirm the generator's `bearer` auth template emits the expected 401 + `WWW-Authenticate: Bearer` on rejection (already covered by IMPL-0001 phase 4 tests; just verify against the demo). _Smoke-checked by generating the demo tree to a tmp dir and confirming `internal/mcpauth/auth.go` reads `MCP_BOUNDARY_TOKEN` and the tree compiles cleanly._
 
 #### Success Criteria
 

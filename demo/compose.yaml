@@ -23,7 +23,15 @@ services:
   demo-mcp:
     build: ./mcp-server
     environment:
+      # Phase 1a: proxy bearer to demo-api. Defaults to DEMO_BEARER_TOKEN
+      # so the same secret round-trips both perimeters unless the user
+      # overrides it.
       MCP_DEMO_API_TOKEN: ${MCP_DEMO_API_TOKEN:-${DEMO_BEARER_TOKEN}}
+      # Phase 1b: MCP boundary auth. The bearer auth template reads this
+      # env var (referenced in mcpgen.hcl as tokens_env) and accepts that
+      # one value on /mcp. The inspector pastes a matching
+      # `Authorization: Bearer …` into its UI before connecting.
+      MCP_BOUNDARY_TOKEN: ${MCP_BOUNDARY_TOKEN}
     depends_on:
       demo-api:
         condition: service_started
