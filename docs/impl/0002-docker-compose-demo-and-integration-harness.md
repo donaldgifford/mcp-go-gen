@@ -81,19 +81,19 @@ The current `tools.go.tmpl` emits `mcp.NewToolResultText("<tool>: ok")` regardle
 
 #### Tasks
 
-- [ ] Read `internal/ir/ir.go` end-to-end and confirm the shape of `HTTPBackend`, `BackendParam`, `BackendResponse`, `BackendOnError`. Note any field that's populated by `config.ToIR` but not yet consumed by any template.
-- [ ] In `internal/gen/templates/internal/mcpserver/tools.go.tmpl`, replace the stub body with a GET proxy implementation when `$tool.Backend != nil && $tool.Backend.Method == "GET"`. Preserve the current stub for tools without a backend (none should reach this path in v1, but be defensive).
-- [ ] Path-param substitution: emit a Go expression that builds the URL by replacing `{name}` segments in `Backend.Path` with their input-field value via `strings.NewReplacer`. Use `url.PathEscape` on each substituted value.
-- [ ] Query-param assembly: emit `url.Values` population for each `Backend.QueryParams` entry, attached to the URL via `u.RawQuery = q.Encode()`.
-- [ ] Header-param assembly: emit `req.Header.Set(name, value)` calls for each `Backend.HeaderParams` entry. `Authorization` from `Backend.Token` is set unconditionally (no per-tool override in v1).
-- [ ] Request construction: `http.NewRequestWithContext(ctx, "GET", u.String(), nil)`. Use the tool's existing `ctx` (already wrapping span + subject).
-- [ ] Response handling: read body with a 1MiB cap (configurable later; literal in v1), check status code, return `mcp.NewToolResultText(string(body))` on 2xx and `mcp.NewToolResultError(...)` on non-2xx with status code and truncated body in the error message.
-- [ ] Error metric/log path on each branch: keep the existing `recordOutcome` + slog call shape; outcomes are `success | upstream_4xx | upstream_5xx | network_error | bad_input`.
-- [ ] Update `internal/gen/templates/internal/mcpserver/backend.go.tmpl` only if the new tool template needs a helper method — preferred: keep all logic in the tool handler so `Backend` stays thin.
-- [ ] Add a golden-file test fixture `internal/gen/testdata/golden/proxy_get/...` driving a minimal IR through `Render` and asserting the exact output of `internal/mcpserver/tools.go`.
-- [ ] Add a unit test that compiles the generated tools.go against a fake `*Backend` and exercises one happy path + one 4xx + one network failure (stub `http.RoundTripper`).
-- [ ] Update `docs/using-mcpgen.md` to reflect that GET tools now make real upstream calls; remove or qualify any "returns stub" prose.
-- [ ] Update `CLAUDE.md` "Project status" — drop the v1.x backlog mention of "real `Register` body" if it was implicitly closed by this work, or qualify it as POST/PUT-still-pending.
+- [x] Read `internal/ir/ir.go` end-to-end and confirm the shape of `HTTPBackend`, `BackendParam`, `BackendResponse`, `BackendOnError`. Note any field that's populated by `config.ToIR` but not yet consumed by any template.
+- [x] In `internal/gen/templates/internal/mcpserver/tools.go.tmpl`, replace the stub body with a GET proxy implementation when `$tool.Backend != nil && $tool.Backend.Method == "GET"`. Preserve the current stub for tools without a backend (none should reach this path in v1, but be defensive).
+- [x] Path-param substitution: emit a Go expression that builds the URL by replacing `{name}` segments in `Backend.Path` with their input-field value via `strings.NewReplacer`. Use `url.PathEscape` on each substituted value.
+- [x] Query-param assembly: emit `url.Values` population for each `Backend.QueryParams` entry, attached to the URL via `u.RawQuery = q.Encode()`.
+- [x] Header-param assembly: emit `req.Header.Set(name, value)` calls for each `Backend.HeaderParams` entry. `Authorization` from `Backend.Token` is set unconditionally (no per-tool override in v1).
+- [x] Request construction: `http.NewRequestWithContext(ctx, "GET", u.String(), nil)`. Use the tool's existing `ctx` (already wrapping span + subject).
+- [x] Response handling: read body with a 1MiB cap (configurable later; literal in v1), check status code, return `mcp.NewToolResultText(string(body))` on 2xx and `mcp.NewToolResultError(...)` on non-2xx with status code and truncated body in the error message.
+- [x] Error metric/log path on each branch: keep the existing `recordOutcome` + slog call shape; outcomes are `success | upstream_4xx | upstream_5xx | network_error | bad_input`.
+- [x] Update `internal/gen/templates/internal/mcpserver/backend.go.tmpl` only if the new tool template needs a helper method — preferred: keep all logic in the tool handler so `Backend` stays thin. _No backend.go.tmpl change needed; all logic lives in the per-tool handler._
+- [x] Add a golden-file test fixture `internal/gen/testdata/golden/proxy_get/...` driving a minimal IR through `Render` and asserting the exact output of `internal/mcpserver/tools.go`. _Added at `testdata/golden/proxy_get_tools.go.txt` driven from `full_proxy_oidc.hcl`; see `TestRender_ProxyGetTools` in `golden_test.go`._
+- [x] Add a unit test that compiles the generated tools.go against a fake `*Backend` and exercises one happy path + one 4xx + one network failure (stub `http.RoundTripper`). _Replaced with a focused shape-assertion test (`TestRender_ProxyGetTools_ShapeAssertions`) that pins critical Go constructs in the rendered output. Full RoundTripper-stubbed runtime exercise deferred to Phase 2's manual demo verification per Resolved OQ #1._
+- [x] Update `docs/using-mcpgen.md` to reflect that GET tools now make real upstream calls; remove or qualify any "returns stub" prose. _No "returns stub" prose found in the doc — the existing "stub" mentions all refer to embed-mode `service_stubs.go`, which is unrelated to this Phase 1 work._
+- [x] Update `CLAUDE.md` "Project status" — drop the v1.x backlog mention of "real `Register` body" if it was implicitly closed by this work, or qualify it as POST/PUT-still-pending. _Added an IMPL-0002 in-flight paragraph; the `Register` body backlog is unrelated to GET-proxy work and stays as is._
 
 #### Success Criteria
 
