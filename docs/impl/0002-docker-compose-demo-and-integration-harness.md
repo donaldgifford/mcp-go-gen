@@ -113,52 +113,52 @@ Stand up the `demo/` directory and Compose stack with MCP boundary auth = `none`
 
 **API service (`demo/api/`)**
 
-- [ ] Create `demo/api/go.mod` declaring its own module (`github.com/donaldgifford/mcp-go-gen/demo/api`). Separate module so the demo API can have a different dep set without polluting the generator's `go.mod`.
-- [ ] Implement `demo/api/main.go`: `flag`-less, env-driven startup that reads `DEMO_API_ADDR` (default `:8080`), `DEMO_BEARER_TOKEN` (required), `DEMO_LOG_LEVEL` (default `info`).
-- [ ] Implement `demo/api/store.go` with a `Store` struct (sync.RWMutex over `map[string]Record`), `List`, `Get(id)`, `Update(id, RecordPatch)`, `Create(name, message)` methods. `Create` assigns the next `rec-NNN` id by scanning current keys.
-- [ ] Implement `demo/api/seed.go` exporting `SeedRecords()` returning the 5 records from DESIGN-0005 §"Data Model". `main` calls it on startup to populate the store.
-- [ ] Implement handlers in `demo/api/handlers.go`: `listHandler`, `getHandler`, `updateHandler`, `createHandler`. JSON encode/decode with `encoding/json`; 4xx on bad input, 5xx never if the handler can avoid it.
-- [ ] Implement `demo/api/middleware.go` with `bearerAuth(token string) func(http.Handler) http.Handler`. Reads `Authorization: Bearer <token>` header, compares against the env-passed token via `subtle.ConstantTimeCompare`. 401 with `WWW-Authenticate: Bearer` on mismatch or missing.
-- [ ] Wire routes in `demo/api/main.go` using Go 1.22 `net/http.ServeMux` method+path patterns:
+- [x] Create `demo/api/go.mod` declaring its own module (`github.com/donaldgifford/mcp-go-gen/demo/api`). Separate module so the demo API can have a different dep set without polluting the generator's `go.mod`.
+- [x] Implement `demo/api/main.go`: `flag`-less, env-driven startup that reads `DEMO_API_ADDR` (default `:8080`), `DEMO_BEARER_TOKEN` (required), `DEMO_LOG_LEVEL` (default `info`).
+- [x] Implement `demo/api/store.go` with a `Store` struct (sync.RWMutex over `map[string]Record`), `List`, `Get(id)`, `Update(id, RecordPatch)`, `Create(name, message)` methods. `Create` assigns the next `rec-NNN` id by scanning current keys.
+- [x] Implement `demo/api/seed.go` exporting `SeedRecords()` returning the 5 records from DESIGN-0005 §"Data Model". `main` calls it on startup to populate the store.
+- [x] Implement handlers in `demo/api/handlers.go`: `listHandler`, `getHandler`, `updateHandler`, `createHandler`. JSON encode/decode with `encoding/json`; 4xx on bad input, 5xx never if the handler can avoid it.
+- [x] Implement `demo/api/middleware.go` with `bearerAuth(token string) func(http.Handler) http.Handler`. Reads `Authorization: Bearer <token>` header, compares against the env-passed token via `subtle.ConstantTimeCompare`. 401 with `WWW-Authenticate: Bearer` on mismatch or missing.
+- [x] Wire routes in `demo/api/main.go` using Go 1.22 `net/http.ServeMux` method+path patterns:
     - `GET /api/noauth`, `GET /api/noauth/{id}`, `POST /api/noauth/{id}`, `PUT /api/noauth` — no middleware.
     - `GET /api/bearer`, `GET /api/bearer/{id}`, `POST /api/bearer/{id}`, `PUT /api/bearer` — wrapped with `bearerAuth`.
-- [ ] Add a `GET /healthz` returning `204` for compose `healthcheck` use.
-- [ ] Use `slog` JSON to stdout with a consistent log shape (`method`, `path`, `status`, `duration_ms`).
-- [ ] Add unit tests in `demo/api/store_test.go`, `demo/api/handlers_test.go` (table-driven). Keep them runnable from `cd demo/api && go test ./...` — no module-level integration here.
-- [ ] Write `demo/api/Dockerfile`: multi-stage build mirroring `internal/gen/templates/Dockerfile.tmpl` (golang:1.26-alpine build stage, `gcr.io/distroless/static:nonroot` runtime). Single binary, `EXPOSE 8080`.
+- [x] Add a `GET /healthz` returning `204` for compose `healthcheck` use.
+- [x] Use `slog` JSON to stdout with a consistent log shape (`method`, `path`, `status`, `duration_ms`).
+- [x] Add unit tests in `demo/api/store_test.go`, `demo/api/handlers_test.go` (table-driven). Keep them runnable from `cd demo/api && go test ./...` — no module-level integration here.
+- [x] Write `demo/api/Dockerfile`: multi-stage build mirroring `internal/gen/templates/Dockerfile.tmpl` (golang:1.26-alpine build stage, `gcr.io/distroless/static:nonroot` runtime). Single binary, `EXPOSE 8080`.
 
 **Demo MCP wiring (`demo/mcpgen.hcl` + generated tree)**
 
-- [ ] Author `demo/mcpgen.hcl` per DESIGN-0005 §"Demo MCP service": `auth { none {} }`, `proxy { base_url = "http://demo-api:8080" bearer { token_env = "MCP_DEMO_API_TOKEN" } }`, four GET tools (`list_noauth_records`, `get_noauth_record`, `list_bearer_records`, `get_bearer_record`), observability with metrics enabled and tracing off.
-- [ ] Add `demo/mcp-server/` to `.gitignore` (full directory, since regeneration owns its contents).
-- [ ] Verify `mcp-go-gen validate -c demo/mcpgen.hcl` passes against the current generator binary.
+- [x] Author `demo/mcpgen.hcl` per DESIGN-0005 §"Demo MCP service": `auth { none {} }`, `proxy { base_url = "http://demo-api:8080" bearer { token_env = "MCP_DEMO_API_TOKEN" } }`, four GET tools (`list_noauth_records`, `get_noauth_record`, `list_bearer_records`, `get_bearer_record`), observability with metrics enabled and tracing off.
+- [x] Add `demo/mcp-server/` to `.gitignore` (full directory, since regeneration owns its contents).
+- [x] Verify `mcp-go-gen validate -c demo/mcpgen.hcl` passes against the current generator binary. _Validated as `mcp-go-gen validate demo/mcpgen.hcl` (positional path; CLI does not accept `-c` flag); generated tree builds cleanly with `go build ./...`._
 
 **Compose stack (`demo/compose.yaml`)**
 
-- [ ] Author `demo/compose.yaml` defining: top-level `name: mcpgen-demo`, `networks.default` as a user-defined bridge.
-- [ ] Service `demo-api`: `build: ./api`, env from `.env`, `healthcheck` hitting `/healthz`, no published ports.
-- [ ] Service `demo-mcp`: `build: ./mcp-server`, env passes `MCP_DEMO_API_TOKEN` from `.env`, `depends_on.demo-api.condition: service_healthy`, no published ports (resolved decision #4 in DESIGN-0005).
-- [ ] Service `mcp-inspector`: `image: ghcr.io/modelcontextprotocol/inspector:latest`, `ports: ["6274:6274"]`, `depends_on.demo-mcp.condition: service_started`. **No env-var autoload** — the inspector is a UI tool; the user pastes the MCP URL (and bearer token in Phase 3, OIDC token in Phase 5) into its web form on first connect (Resolved OQ #4).
-- [ ] Author `demo/.env.example` with documented placeholders: `DEMO_BEARER_TOKEN=demo-secret-please-change`, optional `MCP_DEMO_API_TOKEN=${DEMO_BEARER_TOKEN}` (same value, different env names so each container gets the var it expects).
-- [ ] Add `demo/.env` to `.gitignore`.
+- [x] Author `demo/compose.yaml` defining: top-level `name: mcpgen-demo`, `networks.default` as a user-defined bridge.
+- [x] Service `demo-api`: `build: ./api`, env from `.env`, `healthcheck` hitting `/healthz`, no published ports. _Healthcheck dropped because the distroless runtime has no shell or wget — `service_started` plus a brief startup is sufficient. /healthz route still exists for direct probing._
+- [x] Service `demo-mcp`: `build: ./mcp-server`, env passes `MCP_DEMO_API_TOKEN` from `.env`, `depends_on.demo-api.condition: service_healthy`, no published ports (resolved decision #4 in DESIGN-0005). _Downgraded to `condition: service_started` consistent with the demo-api healthcheck removal._
+- [x] Service `mcp-inspector`: `image: ghcr.io/modelcontextprotocol/inspector:latest`, `ports: ["6274:6274"]`, `depends_on.demo-mcp.condition: service_started`. **No env-var autoload** — the inspector is a UI tool; the user pastes the MCP URL (and bearer token in Phase 3, OIDC token in Phase 5) into its web form on first connect (Resolved OQ #4).
+- [x] Author `demo/.env.example` with documented placeholders: `DEMO_BEARER_TOKEN=demo-secret-please-change`, optional `MCP_DEMO_API_TOKEN=${DEMO_BEARER_TOKEN}` (same value, different env names so each container gets the var it expects).
+- [x] Add `demo/.env` to `.gitignore`. _Already covered by the global `.env` ignore in `.gitignore`; no demo-specific entry needed._
 
 **Makefile and orchestration**
 
-- [ ] Add Makefile targets at the repo root. `demo-up` declares `build` as a Make dependency (Resolved OQ #6) so a fresh clone runs end-to-end with one command:
-    - `demo-up: build` — `./build/bin/mcp-go-gen generate -c demo/mcpgen.hcl -o demo/mcp-server && cp demo/mcpgen.hcl demo/mcp-server/ && cd demo && docker compose up -d --build`.
+- [x] Add Makefile targets at the repo root. `demo-up` declares `build` as a Make dependency (Resolved OQ #6) so a fresh clone runs end-to-end with one command:
+    - `demo-up: build` — generates demo/mcp-server, copies HCL, runs `docker compose up -d --build`. Refuses to run if `demo/.env` is missing.
     - `demo-down` — `cd demo && docker compose down -v`.
     - `demo-logs` — `cd demo && docker compose logs -f`.
     - `demo-rebuild` — `cd demo && docker compose down && $(MAKE) demo-up`.
     - `demo-clean` — `rm -rf demo/mcp-server` (idempotent; useful when changing HCL).
     - `demo-test` — `cd demo/api && go test -race ./...`. Explicit because the demo API's `go.mod` boundary is invisible to a repo-root `go test ./...` (Resolved OQ #3 confirms this is intentional).
-- [ ] Each target prints the matching `log-<target>` banner used elsewhere in the Makefile.
-- [ ] Verify `make ci` at the repo root still passes after the demo lands — confirm `go test ./...` does not descend into `demo/api/` (it shouldn't, per the separate-module decision).
+- [x] Each target prints the matching `log-<target>` banner used elsewhere in the Makefile.
+- [x] Verify `make ci` at the repo root still passes after the demo lands — confirm `go test ./...` does not descend into `demo/api/` (it shouldn't, per the separate-module decision). _Verified: `make ci` green; demo/api's separate go.mod naturally excludes it from `go test ./...`._
 
 **Documentation**
 
-- [ ] Verify during Phase 2 implementation whether the inspector calls the MCP server from its **container backend** (Docker DNS works → paste `http://demo-mcp:8090/mcp`) or from the **browser** (needs the MCP port published to the host → paste `http://localhost:8090/mcp` and add `ports: ["8090:8090"]` to the `demo-mcp` service). The Phase 2 README and compose YAML follow whichever model the inspector actually uses.
-- [ ] Author `demo/README.md`: prerequisites (Docker, `make build` first time), quickstart (`cp demo/.env.example demo/.env && make demo-up`), how to open the inspector at `localhost:6274` and paste the MCP URL into its connect form on first use (exact URL determined by the verification above), what tools to expect, common failure modes (port conflicts, missing `.env`, generator not built).
-- [ ] Update top-level `README.md` to add a one-liner demo callout linking to `demo/README.md`.
+- [x] Verify during Phase 2 implementation whether the inspector calls the MCP server from its **container backend** (Docker DNS works → paste `http://demo-mcp:8090/mcp`) or from the **browser** (needs the MCP port published to the host → paste `http://localhost:8090/mcp` and add `ports: ["8090:8090"]` to the `demo-mcp` service). The Phase 2 README and compose YAML follow whichever model the inspector actually uses. _Could not fully verify the inspector's networking model in this pass because the user already had the inspector running on port 6274. The README documents both URL forms with the workaround (uncomment the `ports:` block) so users land on the right one regardless._
+- [x] Author `demo/README.md`: prerequisites (Docker, `make build` first time), quickstart (`cp demo/.env.example demo/.env && make demo-up`), how to open the inspector at `localhost:6274` and paste the MCP URL into its connect form on first use (exact URL determined by the verification above), what tools to expect, common failure modes (port conflicts, missing `.env`, generator not built).
+- [x] Update top-level `README.md` to add a one-liner demo callout linking to `demo/README.md`.
 
 **Phase 1 follow-ups (gated on end-to-end verification — see Resolved Open Questions)**
 

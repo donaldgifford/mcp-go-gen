@@ -107,6 +107,42 @@ run-local: build ## Run exporter with local config
 	@ $(MAKE) --no-print-directory log-$@
 	@$(BIN_DIR)/$(PROJECT_NAME)
 
+## IMPL-0002 Demo
+
+demo-up: build ## Generate, build, and start the IMPL-0002 demo stack
+	@ $(MAKE) --no-print-directory log-$@
+	@if [ ! -f demo/.env ]; then \
+		echo "demo/.env not found — copy demo/.env.example and edit before running."; \
+		exit 1; \
+	fi
+	@$(BIN_DIR)/$(PROJECT_NAME) generate --config demo/mcpgen.hcl --out demo/mcp-server --force
+	@cp demo/mcpgen.hcl demo/mcp-server/
+	@cd demo && docker compose up -d --build
+	@echo "✓ Demo up — open http://localhost:6274 and paste MCP URL"
+
+demo-down: ## Tear down the demo stack and remove volumes
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo && docker compose down -v
+	@echo "✓ Demo down"
+
+demo-logs: ## Tail the combined demo stack logs
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo && docker compose logs -f
+
+demo-rebuild: ## Regenerate, rebuild images, and restart (preserves nothing)
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo && docker compose down
+	@$(MAKE) --no-print-directory demo-up
+
+demo-clean: ## Remove the regenerated demo MCP tree (forces fresh generate next demo-up)
+	@ $(MAKE) --no-print-directory log-$@
+	@rm -rf demo/mcp-server
+	@echo "✓ demo/mcp-server removed"
+
+demo-test: ## Run the demo API's Go test suite (separate module, not picked up by repo-root tests)
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo/api && go test -race ./...
+
 ## License Compliance
 
 license-check: ## Check dependency licenses against allowed list

@@ -1,0 +1,46 @@
+# IMPL-0002 demo stack — generated MCP + minimal Go API + MCP Inspector,
+# all on a single user-defined bridge so the inspector can reach the MCP
+# server by Compose service name without host.docker.internal gymnastics.
+#
+# Bring up:    make demo-up    (auto-runs `make build` + generates demo/mcp-server)
+# Tear down:   make demo-down
+# Logs:        make demo-logs
+name: mcpgen-demo
+
+services:
+  demo-api:
+    build: ./api
+    environment:
+      DEMO_API_ADDR: ":8080"
+      DEMO_BEARER_TOKEN: ${DEMO_BEARER_TOKEN}
+      DEMO_LOG_LEVEL: ${DEMO_LOG_LEVEL:-info}
+    # No healthcheck: the distroless runtime image has no shell or wget,
+    # so a Compose CMD healthcheck can't run. demo-api starts in <1s
+    # so service_started below is sufficient. The /healthz route exists
+    # for clients that want to probe it directly.
+    restart: unless-stopped
+
+  demo-mcp:
+    build: ./mcp-server
+    environment:
+      MCP_DEMO_API_TOKEN: ${MCP_DEMO_API_TOKEN:-${DEMO_BEARER_TOKEN}}
+    depends_on:
+      demo-api:
+        condition: service_started
+    restart: unless-stopped
+    # Uncomment to expose :8090 to the host for direct curl/debugging.
+    # ports:
+    #   - "8090:8090"
+
+  mcp-inspector:
+    image: ghcr.io/modelcontextprotocol/inspector:latest
+    ports:
+      - "6274:6274"
+    depends_on:
+      demo-mcp:
+        # service_started: the generated MCP server has no /healthz today
+        # (tracked as v1.x backlog in IMPL-0001 Phase 7), so we wait only
+        # for the process to start and rely on inspector retries on first
+        # connect. See IMPL-0002 Resolved OQ #5.
+        condition: service_started
+    restart: unless-stopped

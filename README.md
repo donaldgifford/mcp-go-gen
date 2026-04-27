@@ -127,6 +127,13 @@ IMPL-0001 Phase 7 backlog: request-body parameters for OpenAPI
 operations, full `Register` body in embed mode, `--allow-missing-operations`
 flag.
 
+## Try it locally
+
+A self-contained Docker Compose demo lives at [`demo/`](demo/) — run
+`make demo-up` to bring up a generated MCP server + a small Go API +
+the official MCP Inspector on a single bridge network. See
+[`demo/README.md`](demo/README.md) for the walkthrough.
+
 ## Contributing
 
 See [CLAUDE.md](CLAUDE.md) for the repo layout and day-to-day conventions.
