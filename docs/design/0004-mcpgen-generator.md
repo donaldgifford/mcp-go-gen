@@ -14,6 +14,29 @@ created: 2026-04-21
 **Date:** 2026-04-21
 
 <!--toc:start-->
+- [Overview](#overview)
+- [Goals and Non-Goals](#goals-and-non-goals)
+  - [Goals](#goals)
+  - [Non-Goals](#non-goals)
+- [Background](#background)
+- [Detailed Design](#detailed-design)
+  - [CLI Surface](#cli-surface)
+  - [HCL Schema — Top Level](#hcl-schema--top-level)
+  - [Auth Blocks](#auth-blocks)
+  - [Tool Blocks](#tool-blocks)
+  - [Proxy Block Top-Level Config](#proxy-block-top-level-config)
+  - [Intermediate Representation](#intermediate-representation)
+  - [Generator Pipeline](#generator-pipeline)
+  - [Generated File Layout](#generated-file-layout)
+  - [DST Edit for Embed Mode](#dst-edit-for-embed-mode)
+  - [Regeneration Semantics](#regeneration-semantics)
+  - [Observability in Generated Code](#observability-in-generated-code)
+- [API / Interface Changes](#api--interface-changes)
+- [Data Model](#data-model)
+- [Testing Strategy](#testing-strategy)
+- [Migration / Rollout Plan](#migration--rollout-plan)
+- [Open Questions](#open-questions)
+- [References](#references)
 <!--toc:end-->
 
 ## Overview

@@ -28,4 +28,10 @@ docz create design "Your Design Title"
 - **Abandoned**: Design was not pursued
 
 <!-- BEGIN DOCZ AUTO-GENERATED -->
+## All DESIGNs
+
+| ID | Title | Status | Date | Author | Link |
+|----|-------|--------|------|--------|------|
+| DESIGN-0004 | mcpgen — HCL-driven MCP server generator | Draft | 2026-04-21 | Donald | [0004-mcpgen-generator.md](0004-mcpgen-generator.md) |
+| DESIGN-0005 | Docker Compose demo and integration harness | Draft | 2026-04-27 | Donald Gifford | [0005-docker-compose-demo-and-integration-harness.md](0005-docker-compose-demo-and-integration-harness.md) |
 <!-- END DOCZ AUTO-GENERATED -->
