@@ -1,7 +1,7 @@
 ---
 id: IMPL-0002
 title: "Docker Compose demo and integration harness"
-status: Draft
+status: In Progress
 author: Donald Gifford
 created: 2026-04-27
 ---
@@ -9,7 +9,7 @@ created: 2026-04-27
 
 # IMPL 0002: Docker Compose demo and integration harness
 
-**Status:** Draft
+**Status:** In Progress — phases 1–3 complete (MVP delivered); phases 4 and 5 gated on out-of-scope follow-up IMPLs.
 **Author:** Donald Gifford
 **Date:** 2026-04-27
 
@@ -202,7 +202,9 @@ Flip the MCP boundary from `none` to `bearer` and document inspector setup. No c
 
 ### Phase 4: Write-mutation tools (design phase 1c)
 
-Adds POST/PUT tools to the demo. Gated on a separate generator IMPL (out of this doc's scope) that extends `tools.go.tmpl` with request-body marshaling for non-GET methods. The demo's role here is to be the consumer that proves the generator's write-mutation work is correct end-to-end.
+> **Gated.** Phase 4 cannot start until the generator's `tools.go.tmpl` learns to emit POST/PUT request bodies from declared `input` fields. That work is intentionally out of this IMPL's scope (see Dependencies below) and is tracked as v1.x backlog in IMPL-0001 Phase 7 / `docs/impl/0001-mcpgen-generator-implementation.md`. When the gating IMPL opens, this phase resumes here as the consumer that proves the generator change end-to-end.
+
+Adds POST/PUT tools to the demo. The demo's role here is to be the consumer that proves the generator's write-mutation work is correct end-to-end.
 
 #### Tasks
 
@@ -228,7 +230,9 @@ Adds POST/PUT tools to the demo. Gated on a separate generator IMPL (out of this
 
 ### Phase 5: OAuth2/OIDC flow (design phase 2)
 
-Adds the `/api/oauth2flow` tree to the demo API, an OIDC issuer service to compose, and OIDC tools to the demo MCP. Gated on (a) a phase 2 design refinement that picks the issuer (Open Question #1 below), (b) generator support for OIDC `proxy` blocks emitting bearer-from-token-source (Open Question #2 below), and (c) inspector support for sending OIDC tokens (likely a manual paste from `kubectl get token`-style helpers).
+> **Gated.** Phase 5 is blocked on three independent prerequisites: an INV doc that picks the test issuer, generator support for the proxy bearer-from-token-source semantics covered by Resolved OQ #7 (deferred service-account variant ships first; user-JWT forwarding lands in a follow-up IMPL), and inspector flow for OIDC tokens. None of these prereqs have started; phase 5 sits until they do.
+
+Adds the `/api/oauth2flow` tree to the demo API, an OIDC issuer service to compose, and OIDC tools to the demo MCP.
 
 #### Tasks
 
