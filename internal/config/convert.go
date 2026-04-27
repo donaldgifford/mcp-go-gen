@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -487,12 +488,20 @@ func convertBackend(toolName string, b *ToolBackendHTTP) (*ir.HTTPBackend, []err
 		errs = append(errs, fmt.Errorf("tool %q: backend label %q; only %q is supported", toolName, b.Kind, "http"))
 	}
 
+	method := strings.ToUpper(b.Method)
+	if len(b.BodyParams) > 0 && !methodHasBody(method) {
+		errs = append(errs, fmt.Errorf(
+			"tool %q: body_param is only valid on POST, PUT, or PATCH (got %s)",
+			toolName, method))
+	}
+
 	out := &ir.HTTPBackend{
-		Method:       strings.ToUpper(b.Method),
+		Method:       method,
 		Path:         b.Path,
 		PathParams:   convertParams(b.PathParams),
 		QueryParams:  convertParams(b.QueryParams),
 		HeaderParams: convertParams(b.HeaderParams),
+		BodyParams:   convertParams(b.BodyParams),
 	}
 	if b.Response != nil {
 		switch b.Response.Type {
@@ -514,6 +523,18 @@ func convertBackend(toolName string, b *ToolBackendHTTP) (*ir.HTTPBackend, []err
 		out.OnError.NotFound = b.OnError.NotFound
 	}
 	return out, errs
+}
+
+// methodHasBody reports whether the given upper-cased HTTP method may carry
+// a JSON request body. body_param blocks attached to other methods are a
+// validation error, not silently ignored.
+func methodHasBody(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return true
+	default:
+		return false
+	}
 }
 
 func convertParams(params []ToolBackendParam) []ir.BackendParam {

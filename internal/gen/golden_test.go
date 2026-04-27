@@ -105,7 +105,7 @@ func TestRender_ProxyGetTools_ShapeAssertions(t *testing.T) {
 		{"path-param escapes", `url.PathEscape(id)`},
 		{"path-param target placeholder", `"{id}"`},
 		{"backend base URL prefixing", `t.Backend.BaseURL + rawPath`},
-		{"http GET request construction", `http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)`},
+		{"http GET request construction", `http.NewRequestWithContext(ctx, "GET", u.String(), nil)`},
 		{"bearer token attachment", `httpReq.Header.Set("Authorization", "Bearer "+t.Backend.Token)`},
 		{"backend client invocation", `t.Backend.Client.Do(httpReq)`},
 		{"response body cap", `io.LimitReader(resp.Body, 1<<20)`},
@@ -120,6 +120,93 @@ func TestRender_ProxyGetTools_ShapeAssertions(t *testing.T) {
 	for _, c := range mustContain {
 		if !strings.Contains(src, c.needle) {
 			t.Errorf("rendered tools.go missing %s; wanted to find %q", c.name, c.needle)
+		}
+	}
+}
+
+// TestRender_ProxyPostTools pins the shape of the rendered tools.go for a
+// proxy spec with a POST tool that declares body_param blocks. Catches the
+// case where the body-marshaling branch in tools.go.tmpl drops a critical
+// piece (json.Marshal call, args-presence check, Content-Type header,
+// non-GET method literal).
+//
+// Driven by an inline HCL fixture rather than a fresh testdata file so the
+// fixture's intent is obvious next to the assertions.
+func TestRender_ProxyPostTools(t *testing.T) {
+	src := `
+mcpgen_version = "1"
+
+server {
+  name = "test_post"
+  listener { addr = ":7070" }
+  auth {
+    none {}
+  }
+}
+
+proxy {
+  base_url = "http://127.0.0.1:9999"
+}
+
+tool "update_thing" {
+  description = "Update a thing."
+  input {
+    field "id" {
+      type     = "string"
+      required = true
+    }
+    field "name" {
+      type     = "string"
+      required = false
+    }
+  }
+  backend "http" {
+    method = "POST"
+    path   = "/things/{id}"
+    path_param "id" {
+      from = "id"
+    }
+    body_param "name" {
+      from = "name"
+    }
+  }
+}
+`
+	cfg, diags := config.DecodeBytes([]byte(src), "inline.hcl")
+	if diags.HasErrors() {
+		t.Fatalf("decode: %s", diags.Error())
+	}
+	spec, err := config.ToIR(cfg)
+	if err != nil {
+		t.Fatalf("ToIR: %v", err)
+	}
+	out := t.TempDir()
+	if err := gen.Render(spec, gen.NewFSWriter(out, false)); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(out, "internal", "mcpserver", "tools.go"))
+	if err != nil {
+		t.Fatalf("read tools.go: %v", err)
+	}
+	rendered := string(body)
+
+	mustContain := []struct {
+		name, needle string
+	}{
+		{"bytes import", `"bytes"`},
+		{"encoding/json import", `"encoding/json"`},
+		{"required input via RequireString", `req.RequireString("id")`},
+		{"optional input via GetString", `req.GetString("name", "")`},
+		{"args map for body presence", `args := req.GetArguments()`},
+		{"body map allocation", `bodyMap := make(map[string]any, 1)`},
+		{"presence-checked body insertion", `if v, ok := args["name"]; ok {`},
+		{"json marshal", `json.Marshal(bodyMap)`},
+		{"POST method literal", `http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewReader(bodyBytes))`},
+		{"json content type", `httpReq.Header.Set("Content-Type", "application/json")`},
+	}
+	for _, c := range mustContain {
+		if !strings.Contains(rendered, c.needle) {
+			t.Errorf("rendered tools.go missing %s; wanted %q", c.name, c.needle)
 		}
 	}
 }

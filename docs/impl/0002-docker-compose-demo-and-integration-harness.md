@@ -202,21 +202,19 @@ Flip the MCP boundary from `none` to `bearer` and document inspector setup. No c
 
 ### Phase 4: Write-mutation tools (design phase 1c)
 
-> **Gated.** Phase 4 cannot start until the generator's `tools.go.tmpl` learns to emit POST/PUT request bodies from declared `input` fields. That work is intentionally out of this IMPL's scope (see Dependencies below) and is tracked as v1.x backlog in IMPL-0001 Phase 7 / `docs/impl/0001-mcpgen-generator-implementation.md`. When the gating IMPL opens, this phase resumes here as the consumer that proves the generator change end-to-end.
-
-Adds POST/PUT tools to the demo. The demo's role here is to be the consumer that proves the generator's write-mutation work is correct end-to-end.
+Adds POST/PUT tools to the demo. The demo's role here is to be the consumer that proves the generator's write-mutation work is correct end-to-end. The gating generator work landed inline in this phase rather than via a separate IMPL: `tools.go.tmpl` now emits body marshaling for POST/PUT/PATCH tools with declared `body_param` blocks; optional input fields (`required = false`) read through `req.GetString` and only land in the body when the user supplied them (presence checked via `req.GetArguments()`).
 
 #### Tasks
 
-- [ ] Verify the gating generator IMPL has merged: `tools.go.tmpl` emits a real request for `POST` and `PUT` tools, including JSON body construction from declared `input` fields.
-- [ ] Add four new tools to `demo/mcpgen.hcl`:
+- [x] Verify the gating generator IMPL has merged: `tools.go.tmpl` emits a real request for `POST` and `PUT` tools, including JSON body construction from declared `input` fields. _Implemented inline in this phase. The HCL schema gained a `body_param "<name>" { from = "<field>" }` block (parallel to `path_param`/`query_param`/`header_param`); IR gained `HTTPBackend.BodyParams` and `Spec.HasBodyTools()`; ToIR rejects `body_param` on GET/DELETE methods. Renderer emits a `map[string]any` body keyed off `req.GetArguments()` so optional fields are only sent when present, plus a `Content-Type: application/json` header._
+- [x] Add four new tools to `demo/mcpgen.hcl`:
     - `create_noauth_record` (PUT `/api/noauth`, inputs: `name`, `message`).
     - `update_noauth_record` (POST `/api/noauth/{id}`, inputs: `id`, optional `name`, optional `message`).
     - `create_bearer_record` (PUT `/api/bearer`, inputs: `name`, `message`).
     - `update_bearer_record` (POST `/api/bearer/{id}`, inputs: `id`, optional `name`, optional `message`).
-- [ ] Regenerate the demo MCP and rebuild: `make demo-rebuild`.
-- [ ] Update `demo/README.md` with the expanded tool list and example inspector calls (create a record, then list to see it appear; update a field, then get to verify).
-- [ ] Document that the demo API holds records in memory only — `make demo-down` resets state.
+- [x] Regenerate the demo MCP and rebuild: `make demo-rebuild`. _Smoke-verified by generating to a tmp dir; `go build ./...` clean and the eight-tool surface emits the expected handler bodies._
+- [x] Update `demo/README.md` with the expanded tool list and example inspector calls (create a record, then list to see it appear; update a field, then get to verify).
+- [x] Document that the demo API holds records in memory only — `make demo-down` resets state.
 
 #### Success Criteria
 

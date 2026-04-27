@@ -3,7 +3,9 @@ package mcpserver
 
 import (
 	"context"
-	{{if .Proxy}}"fmt"
+	{{if .HasBodyTools}}"bytes"
+	"encoding/json"
+	{{end}}{{if .Proxy}}"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,15 +42,20 @@ func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequ
 	span.SetAttributes(attribute.String("mcp.subject", subj.Name))
 
 	{{range $tool.Inputs -}}
+	{{if .Required -}}
 	{{.Name}}, err := req.RequireString({{printf "%q" .Name}})
 	if err != nil {
 		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "bad_input", start)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	_ = {{.Name}}
+	{{else -}}
+	{{.Name}} := req.GetString({{printf "%q" .Name}}, "")
+	_ = {{.Name}}
+	{{end -}}
 	{{end}}
 
-	{{if $tool.Backend}}{{if eq $tool.Backend.Method "GET" -}}
+	{{if $tool.Backend -}}
 	rawPath := strings.NewReplacer(
 		{{range $p := $tool.Backend.PathParams}}{{printf "%q" (printf "{%s}" $p.Name)}}, url.PathEscape({{$p.From}}),
 		{{end}}
@@ -67,12 +74,31 @@ func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequ
 	u.RawQuery = q.Encode()
 	{{end}}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	{{if $tool.Backend.BodyParams -}}
+	args := req.GetArguments()
+	bodyMap := make(map[string]any, {{len $tool.Backend.BodyParams}})
+	{{range $p := $tool.Backend.BodyParams -}}
+	if v, ok := args[{{printf "%q" $p.From}}]; ok {
+		bodyMap[{{printf "%q" $p.Name}}] = v
+	}
+	{{end -}}
+	bodyBytes, err := json.Marshal(bodyMap)
+	if err != nil {
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "bad_input", start)
+		return mcp.NewToolResultError(fmt.Sprintf("marshal body: %v", err)), nil
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, {{printf "%q" $tool.Backend.Method}}, u.String(), bytes.NewReader(bodyBytes))
+	{{- else}}
+	httpReq, err := http.NewRequestWithContext(ctx, {{printf "%q" $tool.Backend.Method}}, u.String(), nil)
+	{{- end}}
 	if err != nil {
 		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "network_error", start)
 		return mcp.NewToolResultError(fmt.Sprintf("build request: %v", err)), nil
 	}
 
+	{{if $tool.Backend.BodyParams -}}
+	httpReq.Header.Set("Content-Type", "application/json")
+	{{end -}}
 	{{range $p := $tool.Backend.HeaderParams}}httpReq.Header.Set({{printf "%q" $p.Name}}, {{$p.From}})
 	{{end -}}
 	if t.Backend.Token != "" {
@@ -114,16 +140,7 @@ func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequ
 		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "upstream_5xx", start)
 		return mcp.NewToolResultError(fmt.Sprintf("upstream %d: %s", resp.StatusCode, string(body))), nil
 	}
-	{{- else -}}
-	{{/* Non-GET proxy methods (POST/PUT/PATCH/DELETE) — stub until generator gains write-mutation support; see IMPL-0001 v1.x backlog. */ -}}
-	t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "success", start)
-	slog.InfoContext(ctx, "mcp tool completed",
-		"tool", {{printf "%q" $tool.Name}},
-		"mcp.subject", subj.Name,
-		"outcome", "success",
-		"duration_ms", time.Since(start).Milliseconds())
-	return mcp.NewToolResultText("{{$tool.Name}}: ok"), nil
-	{{- end}}{{else}}
+	{{- else}}
 	t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "success", start)
 	slog.InfoContext(ctx, "mcp tool completed",
 		"tool", {{printf "%q" $tool.Name}},

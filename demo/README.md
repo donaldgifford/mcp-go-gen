@@ -51,13 +51,22 @@ In the inspector UI (Phase 1b — MCP boundary auth = `bearer`):
 2. Connect to the demo MCP server. **Verify which URL form works for
    your inspector build** — see [Inspector URL caveat](#inspector-url-caveat)
    below.
-3. The tools list should show four tools:
-   `list_noauth_records`, `get_noauth_record`,
-   `list_bearer_records`, `get_bearer_record`.
+3. The tools list should show eight tools — four read + four write:
+   - `list_noauth_records`, `get_noauth_record`,
+     `list_bearer_records`, `get_bearer_record` (GET).
+   - `create_noauth_record`, `update_noauth_record`,
+     `create_bearer_record`, `update_bearer_record` (PUT/POST).
 4. Call `list_noauth_records` (no input). Expect a JSON list of the
    five seed records.
 5. Call `get_bearer_record` with `id=rec-003`. Expect that single
    record returned as JSON.
+6. Call `create_noauth_record` with `name="demo"`, `message="hello"`.
+   Expect a 201-shaped result with the new record's id (`rec-006`);
+   re-call `list_noauth_records` to see the six records.
+7. Call `update_bearer_record` with `id=rec-001`, `name="updated"`
+   (omit `message` — `RecordPatch` keeps the prior value when a field
+   is absent). Expect the patched record back; re-call
+   `get_bearer_record` with `id=rec-001` to verify.
 
 To verify the boundary itself: clear the `Authorization` header (or
 paste a wrong value) and reconnect — the inspector should surface a
@@ -96,13 +105,20 @@ This trade-off is documented in IMPL-0002 Resolved OQ #4.
 
 ## What works today vs. backlog
 
-- **Today (phases 1a + 1b):** stack starts, inspector connects with a
-  bearer header, four GET tools call the API and return real JSON
-  record data. MCP boundary auth = `bearer` (IMPL-0002 phases 1–3).
-- **Phase 1c:** POST/PUT tools added to `mcpgen.hcl` once generator
-  write-mutation support lands.
-- **Phase 2:** OAuth2/OIDC flow with a test issuer service. Adds
-  `/api/oauth2flow` to the API and a `demo-idp` service to compose.
+- **Today (phases 1a + 1b + 1c):** stack starts, inspector connects
+  with a bearer header, eight tools list — four GET (list/fetch) plus
+  four PUT/POST (create/update). The generator emits a full request
+  pipeline (path-param substitution, JSON body marshaling with
+  presence-checked optional fields, status branching) for both
+  shapes (IMPL-0002 phases 1–4).
+- **Phase 2 (next):** OAuth2/OIDC flow with a test issuer service.
+  Adds `/api/oauth2flow` to the API and a `demo-idp` service to
+  compose. Gated on the issuer-choice INV.
+
+The demo API holds records in memory only — every `make demo-down`
+or restart of `demo-api` resets the store to the five seed records.
+Inspector calls survive a `demo-mcp` restart (the API container
+keeps its state).
 
 ## Failure modes you might hit
 

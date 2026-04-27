@@ -55,7 +55,7 @@ func (t *Tools) GetRfc(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		return mcp.NewToolResultError(fmt.Sprintf("build url: %v", err)), nil
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		t.recordOutcome("get_rfc", subj.Name, "network_error", start)
 		return mcp.NewToolResultError(fmt.Sprintf("build request: %v", err)), nil

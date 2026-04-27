@@ -158,8 +158,22 @@ type HTTPBackend struct {
 	PathParams   []BackendParam
 	QueryParams  []BackendParam
 	HeaderParams []BackendParam
+	BodyParams   []BackendParam // empty for GET; populated for POST/PUT/PATCH
 	Response     BackendResponse
 	OnError      BackendOnError
+}
+
+// HasBodyTools reports whether any tool in the spec emits a JSON request
+// body. Templates use this to gate body-marshaling imports
+// (bytes, encoding/json) so GET-only proxies don't trip go vet's
+// unused-imports check.
+func (s *Spec) HasBodyTools() bool {
+	for i := range s.Tools {
+		if s.Tools[i].Backend != nil && len(s.Tools[i].Backend.BodyParams) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // BackendParam maps an HTTP parameter position (path/query/header) to the
