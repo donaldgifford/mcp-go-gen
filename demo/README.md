@@ -42,9 +42,9 @@ In the inspector UI (Phase 1b — MCP boundary auth = `bearer`):
 
 1. Locate the inspector's headers/auth panel **before** connecting. Add a
    request header:
-
    - **Header name:** `Authorization`
-   - **Header value:** `Bearer <copy the token portion of MCP_BOUNDARY_TOKEN from demo/.env>`
+   - **Header value:**
+     `Bearer <copy the token portion of MCP_BOUNDARY_TOKEN from demo/.env>`
 
    For the default `.env.example` token, the full value reads:
 
@@ -52,25 +52,25 @@ In the inspector UI (Phase 1b — MCP boundary auth = `bearer`):
    Bearer mcp-boundary-secret-please-change
    ```
 
-   > ⚠️  **The `Bearer ` prefix is required.** The MCP Inspector sends the
-   > custom-header value verbatim — it does NOT add `Bearer ` for you. If
-   > you paste only the token, `demo-mcp` rejects the request with 401 and
-   > the inspector escalates to OAuth-discovery (which fails with a
-   > confusing "OAuth Authentication Failed" / "404 page not found"
-   > message because the bearer-mode MCP server doesn't expose OAuth
-   > endpoints). Always include `Bearer ` and the trailing space.
+   > [!WARNING]
+   > **The `Bearer` prefix is required.** The MCP Inspector sends
+   > the custom-header value verbatim — it does NOT add `Bearer` for you. If you
+   > paste only the token, `demo-mcp` rejects the request with 401 and the
+   > inspector escalates to OAuth-discovery (which fails with a confusing "OAuth
+   > Authentication Failed" / "404 page not found" message because the
+   > bearer-mode MCP server doesn't expose OAuth endpoints). Always include
+   > `Bearer` and the trailing space.
    >
-   > Likewise, paste **only the token portion** — not the full `.env`
-   > value. The `MCP_BOUNDARY_TOKEN=demo-user:mcp-boundary-secret-please-change`
-   > entry uses `<subject>:<token>` format on the server side; the
-   > inspector sends just the token, and `demo-mcp` looks up the
-   > matching subject from the parsed map.
+   > Likewise, paste **only the token portion** — not the full `.env` value. The
+   > `MCP_BOUNDARY_TOKEN=demo-user:mcp-boundary-secret-please-change` entry uses
+   > `<subject>:<token>` format on the server side; the inspector sends just the
+   > token, and `demo-mcp` looks up the matching subject from the parsed map.
 
-   The MCP server reads `MCP_BOUNDARY_TOKEN` from its container env
-   (injected by `compose.yaml` from `demo/.env`), parses it as
-   `<subject>:<token>` pairs, and accepts the token portion on /mcp.
-   Without a matching `Bearer <token>` header the MCP server rejects the
-   connection at its middleware before any tool handler runs.
+   The MCP server reads `MCP_BOUNDARY_TOKEN` from its container env (injected by
+   `compose.yaml` from `demo/.env`), parses it as `<subject>:<token>` pairs, and
+   accepts the token portion on /mcp. Without a matching `Bearer <token>` header
+   the MCP server rejects the connection at its middleware before any tool
+   handler runs.
 
 2. Connect to the demo MCP server. **Verify which URL form works for your
    inspector build** — see [Inspector URL caveat](#inspector-url-caveat) below.
@@ -189,19 +189,19 @@ To prove negative paths:
 
 ## Failure modes you might hit
 
-| Symptom                                                                           | Likely cause                                                                                                              | Fix                                                                                 |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `make demo-up` fails with "demo/.env not found"                                   | Forgot the env copy.                                                                                                      | `cp demo/.env.example demo/.env`                                                    |
-| `make demo-up` fails with "no such file or directory" near `build/bin/mcp-go-gen` | The Makefile's `build` dep didn't run.                                                                                    | `make build && make demo-up`                                                        |
-| Port 6274 already in use                                                          | Another inspector / app on that port.                                                                                     | `lsof -i :6274` — kill or change the host port in `compose.yaml`.                   |
-| Inspector shows "connection refused" on first connect                             | Browser → container path; needs port publishing.                                                                          | Uncomment `ports: ["8090:8090"]` on `demo-mcp` and rebuild.                         |
-| Inspector shows 401 / "unauthorized" on the tools list                            | Missing or wrong `Authorization: Bearer` header in the inspector's headers panel (Phase 1b).                              | Copy `MCP_BOUNDARY_TOKEN` value from `demo/.env` into the inspector and reconnect.  |
-| Inspector shows "OAuth Authentication Failed: 404 page not found"                 | Custom Header value missing the `Bearer ` prefix. The inspector ships the value verbatim, sees a 401, and tries OAuth discovery against the bearer-mode MCP server (which has no OAuth endpoints — hence the 404). | Edit the Authorization header value to read `Bearer <token>` (literal `Bearer`, space, then the token portion of `MCP_BOUNDARY_TOKEN`). |
-| Inspector returns 401 even though token "looks right"                             | Pasted the full `.env` value (`<subject>:<token>`) into the inspector. The server-side parser splits on `:` and only accepts the token half. | Paste only the part after the `:` — for the default `.env.example`, that's `mcp-boundary-secret-please-change`. |
-| OIDC variant tools return `upstream 401` on every call                            | `MCP_OAUTH2_SERVICE_TOKEN` empty or invalid (Phase 5).                                                                    | `make demo-mint-service-token`, paste into `demo/.env`, `make demo-rebuild`.        |
-| OIDC variant inspector tools list fails with 401                                  | The inspector's pasted JWT is expired (1h lifetime), wrong audience, or signed by a previous demo-idp container instance. | `make demo-mint-user-token` and re-paste.                                           |
-| Tool calls return `"<tool>: ok"`                                                  | You're on a generator commit before IMPL-0002 phase 1.                                                                    | `git pull` and `make demo-rebuild`.                                                 |
-| `make ci` fails after editing `demo/api/`                                         | Something in `demo/api/` started failing repo-root tests.                                                                 | The demo's separate `go.mod` should keep CI clean — investigate the actual failure. |
+| Symptom                                                                           | Likely cause                                                                                                                                                                                                      | Fix                                                                                                                                     |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `make demo-up` fails with "demo/.env not found"                                   | Forgot the env copy.                                                                                                                                                                                              | `cp demo/.env.example demo/.env`                                                                                                        |
+| `make demo-up` fails with "no such file or directory" near `build/bin/mcp-go-gen` | The Makefile's `build` dep didn't run.                                                                                                                                                                            | `make build && make demo-up`                                                                                                            |
+| Port 6274 already in use                                                          | Another inspector / app on that port.                                                                                                                                                                             | `lsof -i :6274` — kill or change the host port in `compose.yaml`.                                                                       |
+| Inspector shows "connection refused" on first connect                             | Browser → container path; needs port publishing.                                                                                                                                                                  | Uncomment `ports: ["8090:8090"]` on `demo-mcp` and rebuild.                                                                             |
+| Inspector shows 401 / "unauthorized" on the tools list                            | Missing or wrong `Authorization: Bearer` header in the inspector's headers panel (Phase 1b).                                                                                                                      | Copy `MCP_BOUNDARY_TOKEN` value from `demo/.env` into the inspector and reconnect.                                                      |
+| Inspector shows "OAuth Authentication Failed: 404 page not found"                 | Custom Header value missing the `Bearer` prefix. The inspector ships the value verbatim, sees a 401, and tries OAuth discovery against the bearer-mode MCP server (which has no OAuth endpoints — hence the 404). | Edit the Authorization header value to read `Bearer <token>` (literal `Bearer`, space, then the token portion of `MCP_BOUNDARY_TOKEN`). |
+| Inspector returns 401 even though token "looks right"                             | Pasted the full `.env` value (`<subject>:<token>`) into the inspector. The server-side parser splits on `:` and only accepts the token half.                                                                      | Paste only the part after the `:` — for the default `.env.example`, that's `mcp-boundary-secret-please-change`.                         |
+| OIDC variant tools return `upstream 401` on every call                            | `MCP_OAUTH2_SERVICE_TOKEN` empty or invalid (Phase 5).                                                                                                                                                            | `make demo-mint-service-token`, paste into `demo/.env`, `make demo-rebuild`.                                                            |
+| OIDC variant inspector tools list fails with 401                                  | The inspector's pasted JWT is expired (1h lifetime), wrong audience, or signed by a previous demo-idp container instance.                                                                                         | `make demo-mint-user-token` and re-paste.                                                                                               |
+| Tool calls return `"<tool>: ok"`                                                  | You're on a generator commit before IMPL-0002 phase 1.                                                                                                                                                            | `git pull` and `make demo-rebuild`.                                                                                                     |
+| `make ci` fails after editing `demo/api/`                                         | Something in `demo/api/` started failing repo-root tests.                                                                                                                                                         | The demo's separate `go.mod` should keep CI clean — investigate the actual failure.                                                     |
 
 ## Testing
 
