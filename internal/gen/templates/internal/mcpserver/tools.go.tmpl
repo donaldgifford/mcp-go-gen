@@ -3,7 +3,13 @@ package mcpserver
 
 import (
 	"context"
-	"log/slog"
+	{{if .HasBodyTools}}"bytes"
+	{{end}}{{if .Proxy}}"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	{{end}}"log/slog"
 	"time"
 
 	"{{.ModulePath}}/internal/mcpauth"
@@ -35,15 +41,110 @@ func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequ
 	span.SetAttributes(attribute.String("mcp.subject", subj.Name))
 
 	{{range $tool.Inputs -}}
+	{{if .Required -}}
 	{{.Name}}, err := req.RequireString({{printf "%q" .Name}})
 	if err != nil {
 		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "bad_input", start)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	_ = {{.Name}}
+	{{else -}}
+	{{.Name}} := req.GetString({{printf "%q" .Name}}, "")
+	_ = {{.Name}}
+	{{end -}}
 	{{end}}
 
-	{{/* v1 Phase 3 MVP: stub body. Proxy call lands in follow-up. */ -}}
+	{{if $tool.Backend -}}
+	{{if $tool.Backend.PathParams -}}
+	pathParams := map[string]string{
+		{{range $p := $tool.Backend.PathParams}}{{printf "%q" $p.Name}}: {{$p.From}},
+		{{end -}}
+	}
+	rawPath := t.Backend.SubstitutePath({{printf "%q" $tool.Backend.Path}}, pathParams)
+	{{- else -}}
+	rawPath := {{printf "%q" $tool.Backend.Path}}
+	{{- end}}
+
+	u, err := url.Parse(t.Backend.BaseURL + rawPath)
+	if err != nil {
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "bad_input", start)
+		return mcp.NewToolResultError(fmt.Sprintf("build url: %v", err)), nil
+	}
+
+	{{if $tool.Backend.QueryParams -}}
+	q := u.Query()
+	{{range $p := $tool.Backend.QueryParams}}q.Set({{printf "%q" $p.Name}}, {{$p.From}})
+	{{end -}}
+	u.RawQuery = q.Encode()
+	{{end}}
+
+	{{if $tool.Backend.BodyParams -}}
+	args := req.GetArguments()
+	bodyMap := make(map[string]any, {{len $tool.Backend.BodyParams}})
+	{{range $p := $tool.Backend.BodyParams -}}
+	if v, ok := args[{{printf "%q" $p.From}}]; ok {
+		bodyMap[{{printf "%q" $p.Name}}] = v
+	}
+	{{end -}}
+	bodyBytes, err := json.Marshal(bodyMap)
+	if err != nil {
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "bad_input", start)
+		return mcp.NewToolResultError(fmt.Sprintf("marshal body: %v", err)), nil
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, {{printf "%q" $tool.Backend.Method}}, u.String(), bytes.NewReader(bodyBytes))
+	{{- else}}
+	httpReq, err := http.NewRequestWithContext(ctx, {{printf "%q" $tool.Backend.Method}}, u.String(), nil)
+	{{- end}}
+	if err != nil {
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "network_error", start)
+		return mcp.NewToolResultError(fmt.Sprintf("build request: %v", err)), nil
+	}
+
+	{{if $tool.Backend.BodyParams -}}
+	httpReq.Header.Set("Content-Type", "application/json")
+	{{end -}}
+	{{range $p := $tool.Backend.HeaderParams}}httpReq.Header.Set({{printf "%q" $p.Name}}, {{$p.From}})
+	{{end -}}
+	if t.Backend.Token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+t.Backend.Token)
+	}
+
+	resp, err := t.Backend.Client.Do(httpReq)
+	if err != nil {
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "network_error", start)
+		slog.WarnContext(ctx, "mcp tool upstream call failed",
+			"tool", {{printf "%q" $tool.Name}},
+			"mcp.subject", subj.Name,
+			"outcome", "network_error",
+			"duration_ms", time.Since(start).Milliseconds(),
+			"err", err.Error())
+		return mcp.NewToolResultError(fmt.Sprintf("upstream request failed: %v", err)), nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "network_error", start)
+		return mcp.NewToolResultError(fmt.Sprintf("read response: %v", err)), nil
+	}
+
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "success", start)
+		slog.InfoContext(ctx, "mcp tool completed",
+			"tool", {{printf "%q" $tool.Name}},
+			"mcp.subject", subj.Name,
+			"outcome", "success",
+			"duration_ms", time.Since(start).Milliseconds())
+		return toolResultFromBody(body), nil
+	case resp.StatusCode >= 400 && resp.StatusCode < 500:
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "upstream_4xx", start)
+		return mcp.NewToolResultError(fmt.Sprintf("upstream %d: %s", resp.StatusCode, string(body))), nil
+	default:
+		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "upstream_5xx", start)
+		return mcp.NewToolResultError(fmt.Sprintf("upstream %d: %s", resp.StatusCode, string(body))), nil
+	}
+	{{- else}}
 	t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "success", start)
 	slog.InfoContext(ctx, "mcp tool completed",
 		"tool", {{printf "%q" $tool.Name}},
@@ -51,6 +152,7 @@ func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequ
 		"outcome", "success",
 		"duration_ms", time.Since(start).Milliseconds())
 	return mcp.NewToolResultText("{{$tool.Name}}: ok"), nil
+	{{- end}}
 }
 {{end}}
 
@@ -61,3 +163,17 @@ func (t *Tools) recordOutcome(tool, subject, outcome string, start time.Time) {
 	t.Metrics.ToolInvocations.WithLabelValues(tool, subject, outcome).Inc()
 	t.Metrics.ToolDuration.WithLabelValues(tool, outcome).Observe(time.Since(start).Seconds())
 }
+{{if .Proxy}}
+// toolResultFromBody decides whether to surface an upstream response as
+// structured JSON content (when it parses) or plain text (when it doesn't).
+// MCP clients that understand structured content render it richly; older
+// clients fall back to the text representation. Per IMPL-0002 Resolved
+// OQ #1, this replaces the unconditional NewToolResultText path.
+func toolResultFromBody(body []byte) *mcp.CallToolResult {
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		return mcp.NewToolResultStructured(parsed, string(body))
+	}
+	return mcp.NewToolResultText(string(body))
+}
+{{end}}

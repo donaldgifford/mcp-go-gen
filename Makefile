@@ -107,6 +107,71 @@ run-local: build ## Run exporter with local config
 	@ $(MAKE) --no-print-directory log-$@
 	@$(BIN_DIR)/$(PROJECT_NAME)
 
+## IMPL-0002 Demo
+
+demo-up: build ## Generate, build, and start the IMPL-0002 demo stack
+	@ $(MAKE) --no-print-directory log-$@
+	@if [ ! -f demo/.env ]; then \
+		echo "demo/.env not found — copy demo/.env.example and edit before running."; \
+		exit 1; \
+	fi
+	@$(BIN_DIR)/$(PROJECT_NAME) generate --config demo/mcpgen.hcl --out demo/mcp-server --force
+	@cp demo/mcpgen.hcl demo/mcp-server/
+	@cd demo && docker compose up -d --build
+	@echo "✓ Demo up — open http://localhost:6274 and paste MCP URL"
+
+demo-down: ## Tear down the demo stack and remove volumes
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo && docker compose down -v
+	@echo "✓ Demo down"
+
+demo-logs: ## Tail the combined demo stack logs
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo && docker compose logs -f
+
+demo-rebuild: ## Regenerate, rebuild images, and restart (preserves nothing)
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo && docker compose down
+	@$(MAKE) --no-print-directory demo-up
+
+demo-clean: ## Remove the regenerated demo MCP tree (forces fresh generate next demo-up)
+	@ $(MAKE) --no-print-directory log-$@
+	@rm -rf demo/mcp-server
+	@echo "✓ demo/mcp-server removed"
+
+demo-test: ## Run the demo API's Go test suite (separate module, not picked up by repo-root tests)
+	@ $(MAKE) --no-print-directory log-$@
+	@cd demo/api && go test -race ./...
+	@cd demo/idp && go test -race ./...
+
+demo-up-oidc: build ## IMPL-0002 Phase 5: regenerate demo MCP from the OIDC HCL and bring the stack up
+	@ $(MAKE) --no-print-directory log-$@
+	@if [ ! -f demo/.env ]; then \
+		echo "demo/.env not found — copy demo/.env.example and edit before running."; \
+		exit 1; \
+	fi
+	@$(BIN_DIR)/$(PROJECT_NAME) generate --config demo/mcpgen-oidc.hcl --out demo/mcp-server --force
+	@cp demo/mcpgen-oidc.hcl demo/mcp-server/mcpgen.hcl
+	@cd demo && docker compose up -d --build
+	@echo "✓ Demo (OIDC variant) up — mint a JWT with 'make demo-mint-service-token'"
+	@echo "  then paste it into the inspector at http://localhost:6274"
+
+demo-mint-service-token: ## IMPL-0002 Phase 5: mint a service-account JWT from demo-idp (assumes demo-up{,-oidc} has run)
+	@ $(MAKE) --no-print-directory log-$@
+	@printf "Service-account JWT (paste into demo/.env as MCP_OAUTH2_SERVICE_TOKEN):\n\n"
+	@curl -s "http://localhost:5556/token?sub=mcp-service-account" | \
+		grep -oE '"access_token":"[^"]+"' | \
+		sed -e 's/^"access_token":"//' -e 's/"$$//'
+	@printf "\nThen run: make demo-rebuild\n"
+
+demo-mint-user-token: ## IMPL-0002 Phase 5: mint a user JWT from demo-idp for the inspector
+	@ $(MAKE) --no-print-directory log-$@
+	@printf "User JWT (paste into the inspector's headers panel as 'Authorization: Bearer <token>'):\n\n"
+	@curl -s "http://localhost:5556/token?sub=alice" | \
+		grep -oE '"access_token":"[^"]+"' | \
+		sed -e 's/^"access_token":"//' -e 's/"$$//'
+	@printf "\n"
+
 ## License Compliance
 
 license-check: ## Check dependency licenses against allowed list

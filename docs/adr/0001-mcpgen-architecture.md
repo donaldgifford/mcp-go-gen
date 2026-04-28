@@ -10,6 +10,22 @@ created: 2026-04-21
 # 0001. mcpgen — HCL-driven MCP server generator architecture
 
 <!--toc:start-->
+- [Status](#status)
+- [Context](#context)
+- [Decision](#decision)
+  - [1. HCL2 as the configuration language](#1-hcl2-as-the-configuration-language)
+  - [2. Generator output: text/template + go/format, plus DST for edits](#2-generator-output-texttemplate--goformat-plus-dst-for-edits)
+  - [3. Dual input for proxy mode: inline HCL or OpenAPI reference](#3-dual-input-for-proxy-mode-inline-hcl-or-openapi-reference)
+  - [4. Dual output: new project or add-to-existing](#4-dual-output-new-project-or-add-to-existing)
+  - [5. Tool name: mcpgen](#5-tool-name-mcpgen)
+  - [6. Observability defaults are non-negotiable](#6-observability-defaults-are-non-negotiable)
+  - [7. Generated-code ownership model](#7-generated-code-ownership-model)
+- [Consequences](#consequences)
+  - [Positive](#positive)
+  - [Negative](#negative)
+  - [Neutral](#neutral)
+- [Alternatives Considered](#alternatives-considered)
+- [References](#references)
 <!--toc:end-->
 
 ## Status

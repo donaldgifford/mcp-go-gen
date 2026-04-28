@@ -195,6 +195,7 @@ type ToolBackendHTTP struct {
 	PathParams   []ToolBackendParam   `hcl:"path_param,block"`
 	QueryParams  []ToolBackendParam   `hcl:"query_param,block"`
 	HeaderParams []ToolBackendParam   `hcl:"header_param,block"`
+	BodyParams   []ToolBackendParam   `hcl:"body_param,block"` // POST/PUT/PATCH only
 	Response     *ToolBackendResponse `hcl:"response,block"`
 	OnError      *ToolBackendOnError  `hcl:"on_error,block"`
 }

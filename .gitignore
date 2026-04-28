@@ -34,6 +34,10 @@ go.work.sum
 # Build directories
 build/
 
+# IMPL-0002 demo: regenerated each `make demo-up` from demo/mcpgen.hcl
+# via mcp-go-gen, so the tree is never committed.
+demo/mcp-server/
+
 # Donald-loop / Ralph-loop local state (never committed)
 .claude/donald-loop.local.md
 .claude/ralph-loop.local.md

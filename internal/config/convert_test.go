@@ -593,6 +593,147 @@ tool "get_rfc" {
 	}
 }
 
+func TestToIR_BackendBodyParamRequiresWriteMethod(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadAndConvert(t, `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    none {}
+  }
+}
+tool "get_with_body" {
+  description = "x"
+  input {
+    field "name" { type = "string" }
+  }
+  backend "http" {
+    method = "GET"
+    path   = "/things"
+    body_param "name" {
+      from = "name"
+    }
+  }
+}
+`)
+	if err == nil {
+		t.Fatal("ToIR error = nil, want body_param-on-GET rejection")
+	}
+	if !strings.Contains(err.Error(), "body_param is only valid on POST, PUT, or PATCH") {
+		t.Errorf("ToIR error = %v, want mention of POST/PUT/PATCH", err)
+	}
+}
+
+func TestToIR_BackendBodyParamAcceptedOnWriteMethods(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{"POST", "PUT", "PATCH"} {
+		method := method
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+
+			spec, err := loadAndConvert(t, `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    none {}
+  }
+}
+tool "write_thing" {
+  description = "x"
+  input {
+    field "name" {
+      type     = "string"
+      required = true
+    }
+  }
+  backend "http" {
+    method = "`+method+`"
+    path   = "/things"
+    body_param "name" {
+      from = "name"
+    }
+  }
+}
+`)
+			if err != nil {
+				t.Fatalf("ToIR (%s): %v", method, err)
+			}
+			be := spec.Tools[0].Backend
+			if len(be.BodyParams) != 1 || be.BodyParams[0].Name != "name" {
+				t.Errorf("BodyParams = %v, want one entry named 'name'", be.BodyParams)
+			}
+		})
+	}
+}
+
+func TestToIR_HasBodyToolsFlag(t *testing.T) {
+	t.Parallel()
+
+	src := `
+mcpgen_version = "1"
+server {
+  name = "x"
+  listener { addr = ":7070" }
+  auth {
+    none {}
+  }
+}
+tool "get_thing" {
+  description = "x"
+  input {
+    field "id" {
+      type     = "string"
+      required = true
+    }
+  }
+  backend "http" {
+    method = "GET"
+    path   = "/things/{id}"
+    path_param "id" {
+      from = "id"
+    }
+  }
+}
+`
+	spec, err := loadAndConvert(t, src)
+	if err != nil {
+		t.Fatalf("ToIR: %v", err)
+	}
+	if spec.HasBodyTools() {
+		t.Error("HasBodyTools = true, want false (no tools have body_param)")
+	}
+
+	srcWithBody := strings.Replace(src,
+		`backend "http" {
+    method = "GET"
+    path   = "/things/{id}"
+    path_param "id" {
+      from = "id"
+    }
+  }`,
+		`backend "http" {
+    method = "POST"
+    path   = "/things"
+    body_param "name" {
+      from = "id"
+    }
+  }`,
+		1)
+	specBody, err := loadAndConvert(t, srcWithBody)
+	if err != nil {
+		t.Fatalf("ToIR (body variant): %v", err)
+	}
+	if !specBody.HasBodyTools() {
+		t.Error("HasBodyTools = false, want true (tool declares body_param)")
+	}
+}
+
 func TestToIR_BackendBadResponseType(t *testing.T) {
 	t.Parallel()
 

@@ -1,0 +1,98 @@
+---
+# IMPL-0002 demo stack — generated MCP + minimal Go API + MCP Inspector,
+# all on a single user-defined bridge so the inspector can reach the MCP
+# server by Compose service name without host.docker.internal gymnastics.
+#
+# Bring up:    make demo-up    (auto-runs `make build` + generates demo/mcp-server)
+# Tear down:   make demo-down
+# Logs:        make demo-logs
+name: mcpgen-demo
+
+services:
+  demo-idp:
+    # Phase 5 (IMPL-0002): hand-rolled OIDC issuer per INV-0001 — issues
+    # RS256 JWTs over /token, exposes /jwks.json + discovery doc.
+    # Published to the host so users can `curl localhost:5556/token` and
+    # paste the result into the inspector's auth panel.
+    build: ./idp
+    environment:
+      IDP_ISSUER: ${IDP_ISSUER:-http://demo-idp:5556}
+      IDP_AUDIENCE: ${IDP_AUDIENCE:-mcp-demo-api}
+    ports:
+      - "5556:5556"
+    restart: unless-stopped
+
+  demo-api:
+    build: ./api
+    environment:
+      DEMO_API_ADDR: ":8080"
+      DEMO_BEARER_TOKEN: ${DEMO_BEARER_TOKEN}
+      DEMO_LOG_LEVEL: ${DEMO_LOG_LEVEL:-info}
+      # OIDC middleware on /api/oauth2flow only activates when these are
+      # set. Empty values leave the route returning 503 (the demo API
+      # remains usable for Phases 1–4).
+      DEMO_OIDC_ISSUER: ${IDP_ISSUER:-http://demo-idp:5556}
+      DEMO_OIDC_AUDIENCE: ${IDP_AUDIENCE:-mcp-demo-api}
+    depends_on:
+      demo-idp:
+        condition: service_started
+    # No healthcheck: the distroless runtime image has no shell or wget,
+    # so a Compose CMD healthcheck can't run. demo-api starts in <1s
+    # so service_started below is sufficient. The /healthz route exists
+    # for clients that want to probe it directly.
+    restart: unless-stopped
+
+  demo-mcp:
+    build: ./mcp-server
+    environment:
+      # Phase 1a: proxy bearer to demo-api. Defaults to DEMO_BEARER_TOKEN
+      # so the same secret round-trips both perimeters unless the user
+      # overrides it.
+      MCP_DEMO_API_TOKEN: ${MCP_DEMO_API_TOKEN:-${DEMO_BEARER_TOKEN}}
+      # Phase 1b: MCP boundary auth. The bearer auth template reads this
+      # env var (referenced in mcpgen.hcl as tokens_env) and accepts that
+      # one value on /mcp. The inspector pastes a matching
+      # `Authorization: Bearer …` into its UI before connecting.
+      MCP_BOUNDARY_TOKEN: ${MCP_BOUNDARY_TOKEN}
+      # Phase 2 (IMPL-0002 Phase 5): static service-account JWT used by
+      # the proxy to call /api/oauth2flow. Mint via
+      # `make demo-mint-service-token` (see demo/README.md). Empty by
+      # default — Phase 5 OIDC tools fail at the upstream side until
+      # this is set, but the rest of the demo continues to work.
+      MCP_OAUTH2_SERVICE_TOKEN: ${MCP_OAUTH2_SERVICE_TOKEN:-}
+    depends_on:
+      demo-api:
+        condition: service_started
+    restart: unless-stopped
+    # Uncomment to expose :8090 to the host for direct curl/debugging.
+    # ports:
+    #   - "8090:8090"
+
+  mcp-inspector:
+    image: ghcr.io/modelcontextprotocol/inspector:latest
+    environment:
+      # Inspector v0.21+ binds to localhost (127.0.0.1) inside the
+      # container by default, so Docker's host port forward has nothing
+      # on the bridge interface to talk to — TCP connects then resets.
+      # HOST=0.0.0.0 makes the UI server (6274) and proxy (6277) listen
+      # on every interface so the published ports actually work.
+      HOST: 0.0.0.0
+      # Skip the per-session auth token. Acceptable for a local demo —
+      # the inspector's anti-DNS-rebinding guard would otherwise force
+      # users to copy a 64-char session token from the container logs
+      # on every restart.
+      DANGEROUSLY_OMIT_AUTH: "true"
+    ports:
+      # 6274: the React UI. 6277: the proxy backend the UI calls into
+      # (and where the actual MCP transport originates). Both must be
+      # reachable from the host browser.
+      - "6274:6274"
+      - "6277:6277"
+    depends_on:
+      demo-mcp:
+        # service_started: the generated MCP server has no /healthz today
+        # (tracked as v1.x backlog in IMPL-0001 Phase 7), so we wait only
+        # for the process to start and rely on inspector retries on first
+        # connect. See IMPL-0002 Resolved OQ #5.
+        condition: service_started
+    restart: unless-stopped
