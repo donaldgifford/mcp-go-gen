@@ -4,12 +4,12 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"rfc-api-mcp/internal/mcpauth"
@@ -45,9 +45,10 @@ func (t *Tools) GetRfc(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	}
 	_ = id
 
-	rawPath := strings.NewReplacer(
-		"{id}", url.PathEscape(id),
-	).Replace("/rfcs/{id}")
+	pathParams := map[string]string{
+		"id": id,
+	}
+	rawPath := t.Backend.SubstitutePath("/rfcs/{id}", pathParams)
 
 	u, err := url.Parse(t.Backend.BaseURL + rawPath)
 	if err != nil {
@@ -92,7 +93,7 @@ func (t *Tools) GetRfc(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 			"mcp.subject", subj.Name,
 			"outcome", "success",
 			"duration_ms", time.Since(start).Milliseconds())
-		return mcp.NewToolResultText(string(body)), nil
+		return toolResultFromBody(body), nil
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		t.recordOutcome("get_rfc", subj.Name, "upstream_4xx", start)
 		return mcp.NewToolResultError(fmt.Sprintf("upstream %d: %s", resp.StatusCode, string(body))), nil
@@ -108,4 +109,17 @@ func (t *Tools) GetRfc(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 func (t *Tools) recordOutcome(tool, subject, outcome string, start time.Time) {
 	t.Metrics.ToolInvocations.WithLabelValues(tool, subject, outcome).Inc()
 	t.Metrics.ToolDuration.WithLabelValues(tool, outcome).Observe(time.Since(start).Seconds())
+}
+
+// toolResultFromBody decides whether to surface an upstream response as
+// structured JSON content (when it parses) or plain text (when it doesn't).
+// MCP clients that understand structured content render it richly; older
+// clients fall back to the text representation. Per IMPL-0002 Resolved
+// OQ #1, this replaces the unconditional NewToolResultText path.
+func toolResultFromBody(body []byte) *mcp.CallToolResult {
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		return mcp.NewToolResultStructured(parsed, string(body))
+	}
+	return mcp.NewToolResultText(string(body))
 }

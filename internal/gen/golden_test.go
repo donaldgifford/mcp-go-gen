@@ -101,9 +101,9 @@ func TestRender_ProxyGetTools_ShapeAssertions(t *testing.T) {
 	mustContain := []struct {
 		name, needle string
 	}{
-		{"path-param replacer literal", `strings.NewReplacer(`},
-		{"path-param escapes", `url.PathEscape(id)`},
-		{"path-param target placeholder", `"{id}"`},
+		{"path-param map allocation", `pathParams := map[string]string{`},
+		{"path-param entry for id", `"id": id`},
+		{"path-substitution helper call", `t.Backend.SubstitutePath("/rfcs/{id}", pathParams)`},
 		{"backend base URL prefixing", `t.Backend.BaseURL + rawPath`},
 		{"http GET request construction", `http.NewRequestWithContext(ctx, "GET", u.String(), nil)`},
 		{"bearer token attachment", `httpReq.Header.Set("Authorization", "Bearer "+t.Backend.Token)`},
@@ -113,7 +113,9 @@ func TestRender_ProxyGetTools_ShapeAssertions(t *testing.T) {
 		{"4xx outcome label", `"upstream_4xx"`},
 		{"5xx outcome label", `"upstream_5xx"`},
 		{"network error outcome", `"network_error"`},
-		{"success result type", `mcp.NewToolResultText(string(body))`},
+		{"structured-or-text result helper", `return toolResultFromBody(body), nil`},
+		{"toolResultFromBody definition uses NewToolResultStructured", `mcp.NewToolResultStructured(parsed, string(body))`},
+		{"toolResultFromBody fallback to text", `return mcp.NewToolResultText(string(body))`},
 		{"upstream error result type", `mcp.NewToolResultError(fmt.Sprintf("upstream %d:`},
 	}
 
@@ -203,6 +205,7 @@ tool "update_thing" {
 		{"json marshal", `json.Marshal(bodyMap)`},
 		{"POST method literal", `http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewReader(bodyBytes))`},
 		{"json content type", `httpReq.Header.Set("Content-Type", "application/json")`},
+		{"path helper for path-param tools", `t.Backend.SubstitutePath("/things/{id}", pathParams)`},
 	}
 	for _, c := range mustContain {
 		if !strings.Contains(rendered, c.needle) {

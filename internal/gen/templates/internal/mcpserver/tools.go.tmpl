@@ -4,12 +4,11 @@ package mcpserver
 import (
 	"context"
 	{{if .HasBodyTools}}"bytes"
-	"encoding/json"
-	{{end}}{{if .Proxy}}"fmt"
+	{{end}}{{if .Proxy}}"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	{{end}}"log/slog"
 	"time"
 
@@ -56,10 +55,15 @@ func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequ
 	{{end}}
 
 	{{if $tool.Backend -}}
-	rawPath := strings.NewReplacer(
-		{{range $p := $tool.Backend.PathParams}}{{printf "%q" (printf "{%s}" $p.Name)}}, url.PathEscape({{$p.From}}),
-		{{end}}
-	).Replace({{printf "%q" $tool.Backend.Path}})
+	{{if $tool.Backend.PathParams -}}
+	pathParams := map[string]string{
+		{{range $p := $tool.Backend.PathParams}}{{printf "%q" $p.Name}}: {{$p.From}},
+		{{end -}}
+	}
+	rawPath := t.Backend.SubstitutePath({{printf "%q" $tool.Backend.Path}}, pathParams)
+	{{- else -}}
+	rawPath := {{printf "%q" $tool.Backend.Path}}
+	{{- end}}
 
 	u, err := url.Parse(t.Backend.BaseURL + rawPath)
 	if err != nil {
@@ -132,7 +136,7 @@ func (t *Tools) {{goIdent $tool.Name}}(ctx context.Context, req mcp.CallToolRequ
 			"mcp.subject", subj.Name,
 			"outcome", "success",
 			"duration_ms", time.Since(start).Milliseconds())
-		return mcp.NewToolResultText(string(body)), nil
+		return toolResultFromBody(body), nil
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		t.recordOutcome({{printf "%q" $tool.Name}}, subj.Name, "upstream_4xx", start)
 		return mcp.NewToolResultError(fmt.Sprintf("upstream %d: %s", resp.StatusCode, string(body))), nil
@@ -159,3 +163,17 @@ func (t *Tools) recordOutcome(tool, subject, outcome string, start time.Time) {
 	t.Metrics.ToolInvocations.WithLabelValues(tool, subject, outcome).Inc()
 	t.Metrics.ToolDuration.WithLabelValues(tool, outcome).Observe(time.Since(start).Seconds())
 }
+{{if .Proxy}}
+// toolResultFromBody decides whether to surface an upstream response as
+// structured JSON content (when it parses) or plain text (when it doesn't).
+// MCP clients that understand structured content render it richly; older
+// clients fall back to the text representation. Per IMPL-0002 Resolved
+// OQ #1, this replaces the unconditional NewToolResultText path.
+func toolResultFromBody(body []byte) *mcp.CallToolResult {
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		return mcp.NewToolResultStructured(parsed, string(body))
+	}
+	return mcp.NewToolResultText(string(body))
+}
+{{end}}

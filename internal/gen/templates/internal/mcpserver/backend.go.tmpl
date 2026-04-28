@@ -3,8 +3,10 @@ package mcpserver
 
 import (
 	"net/http"
+	"net/url"
 	{{if .Proxy.Bearer}}"os"
-	{{end}}"time"
+	{{end}}"strings"
+	"time"
 )
 
 // Backend is the HTTP client proxy tools use to reach the upstream service.
@@ -27,4 +29,20 @@ func NewBackend() *Backend {
 			Timeout: {{if .Proxy.TotalTimeout}}{{.Proxy.TotalTimeout.Nanoseconds}} * time.Nanosecond{{else}}30 * time.Second{{end}},
 		},
 	}
+}
+
+// SubstitutePath replaces {name} placeholders in template with their values
+// from params. Each value is URL-path-escaped before substitution so callers
+// don't have to think about it. Centralizes the escaping rule per
+// IMPL-0002 Phase 2 follow-up; callers used to inline strings.NewReplacer
+// at template-emit time.
+func (b *Backend) SubstitutePath(template string, params map[string]string) string {
+	if len(params) == 0 {
+		return template
+	}
+	pairs := make([]string, 0, len(params)*2)
+	for name, value := range params {
+		pairs = append(pairs, "{"+name+"}", url.PathEscape(value))
+	}
+	return strings.NewReplacer(pairs...).Replace(template)
 }
