@@ -33,5 +33,5 @@ docz create impl "Your Implementation Title"
 | ID | Title | Status | Date | Author | Link |
 |----|-------|--------|------|--------|------|
 | IMPL-0001 | mcpgen Generator Implementation | Draft | 2026-04-24 | Donald Gifford | [0001-mcpgen-generator-implementation.md](0001-mcpgen-generator-implementation.md) |
-| IMPL-0002 | Docker Compose demo and integration harness | Draft | 2026-04-27 | Donald Gifford | [0002-docker-compose-demo-and-integration-harness.md](0002-docker-compose-demo-and-integration-harness.md) |
+| IMPL-0002 | Docker Compose demo and integration harness | Completed | 2026-04-27 | Donald Gifford | [0002-docker-compose-demo-and-integration-harness.md](0002-docker-compose-demo-and-integration-harness.md) |
 <!-- END DOCZ AUTO-GENERATED -->

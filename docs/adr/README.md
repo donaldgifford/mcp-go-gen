@@ -27,4 +27,9 @@ docz create adr "Your ADR Title"
 - **Superseded by ADR-XXXX**: Replaced by another ADR
 
 <!-- BEGIN DOCZ AUTO-GENERATED -->
+## All ADRs
+
+| ID | Title | Status | Date | Author | Link |
+|----|-------|--------|------|--------|------|
+| ADR-0001 | mcpgen — HCL-driven MCP server generator architecture | Accepted | 2026-04-21 | Donald | [0001-mcpgen-architecture.md](0001-mcpgen-architecture.md) |
 <!-- END DOCZ AUTO-GENERATED -->

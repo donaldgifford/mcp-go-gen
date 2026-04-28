@@ -15,8 +15,10 @@ This is the IMPL-0002 deliverable. See:
 
 | Path                | What it is                                                   |
 | ---                 | ---                                                          |
-| `api/`              | The minimal Go HTTP API (separate Go module). Five seed records, three auth trees (`/api/noauth`, `/api/bearer`, `/api/oauth2flow`); phase 1 wires the first two. |
-| `mcpgen.hcl`        | The HCL spec the demo MCP server is generated from. Auth = `bearer` (phase 1b) — the inspector pastes a matching `Authorization: Bearer …` before connecting. |
+| `api/`              | The minimal Go HTTP API (separate Go module). Five seed records, three auth trees (`/api/noauth`, `/api/bearer`, `/api/oauth2flow`); all three are wired. |
+| `idp/`              | The hand-rolled OIDC issuer (separate Go module). RS256 JWTs over `/token`, JWKS over `/jwks.json`. Per INV-0001 we ship this rather than dex/Keycloak — see the INV for the trade-off matrix. |
+| `mcpgen.hcl`        | Default HCL spec — auth = `bearer` (phase 1b/1c). Eight tools across the noauth + bearer trees. |
+| `mcpgen-oidc.hcl`   | Phase 5 HCL variant — auth = `oidc` against `demo-idp`. Four tools across the oauth2flow tree. Switched in via `make demo-up-oidc`. |
 | `mcp-server/`       | Generated each `make demo-up` from `mcpgen.hcl`. **Gitignored** — never edit by hand. |
 | `compose.yaml`      | Three services (`demo-api`, `demo-mcp`, `mcp-inspector`) on one bridge. |
 | `.env.example`      | Template for `demo/.env` (copy, edit, never commit).         |
@@ -105,20 +107,72 @@ This trade-off is documented in IMPL-0002 Resolved OQ #4.
 
 ## What works today vs. backlog
 
-- **Today (phases 1a + 1b + 1c):** stack starts, inspector connects
-  with a bearer header, eight tools list — four GET (list/fetch) plus
-  four PUT/POST (create/update). The generator emits a full request
-  pipeline (path-param substitution, JSON body marshaling with
+- **Default (`make demo-up`) — phases 1a + 1b + 1c (Phase 4 IMPL):**
+  stack starts, inspector connects with a static bearer header,
+  eight tools list — four GET (list/fetch) plus four PUT/POST
+  (create/update). The generator emits a full request pipeline
+  (path-param substitution, JSON body marshaling with
   presence-checked optional fields, status branching) for both
-  shapes (IMPL-0002 phases 1–4).
-- **Phase 2 (next):** OAuth2/OIDC flow with a test issuer service.
-  Adds `/api/oauth2flow` to the API and a `demo-idp` service to
-  compose. Gated on the issuer-choice INV.
+  shapes.
+- **OIDC variant (`make demo-up-oidc`) — phase 2 (Phase 5 IMPL):**
+  the same compose stack, plus a hand-rolled `demo-idp` issuer
+  (INV-0001), regenerated from `demo/mcpgen-oidc.hcl`. The MCP
+  boundary auth is `oidc` — the inspector pastes a JWT minted from
+  `demo-idp/token`, the MCP server validates it against
+  `demo-idp/jwks.json`, and tools call `/api/oauth2flow` on the demo
+  API which validates the same JWKS. Per Resolved OQ #7, the proxy
+  uses a separate static service-account JWT (mint with
+  `make demo-mint-service-token`); end-to-end identity propagation is
+  v1.x backlog.
 
 The demo API holds records in memory only — every `make demo-down`
 or restart of `demo-api` resets the store to the five seed records.
 Inspector calls survive a `demo-mcp` restart (the API container
 keeps its state).
+
+## Phase 5 (OIDC) walkthrough
+
+The OIDC flow ships behind a separate make target so you don't lose
+Phase 4's bearer experience when exploring it.
+
+```bash
+# 1. Bring up the OIDC variant. demo-idp comes up alongside the rest;
+#    the MCP server validates JWTs against its JWKS endpoint.
+make demo-up-oidc
+
+# 2. Mint a service-account JWT for the proxy → /api/oauth2flow leg.
+#    Print it, paste into demo/.env as MCP_OAUTH2_SERVICE_TOKEN.
+make demo-mint-service-token
+
+# 3. Rebuild so demo-mcp picks up the new env.
+make demo-rebuild
+
+# 4. Mint a user JWT for the inspector → MCP leg.
+make demo-mint-user-token
+
+# 5. Open the inspector, paste the user JWT into its headers panel
+#    as `Authorization: Bearer <token>`, connect to http://demo-mcp:8090/mcp.
+open http://localhost:6274
+```
+
+Tool calls in the OIDC variant: `list_oauth_records`,
+`get_oauth_record`, `create_oauth_record`, `update_oauth_record` —
+each hits `/api/oauth2flow/...` on the demo API. Per
+[INV-0001](../docs/investigation/0001-oidc-issuer-for-impl-0002-demo.md),
+demo-idp is a ~120-LOC Go service that signs RS256 JWTs against an
+in-memory key — restart and every previously minted token becomes
+invalid. Acceptable trade-off for a demo.
+
+To prove negative paths:
+
+- Wrong audience: `curl "http://localhost:5556/token?aud=wrong"` then
+  paste — the inspector should see a 401 from the MCP boundary.
+- Expired token: tokens have a 1h lifetime; let one age out and
+  retry — same 401.
+- Missing service-account JWT: leave `MCP_OAUTH2_SERVICE_TOKEN`
+  empty in `.env`; tools list, but each call returns an `upstream
+  4xx` from `/api/oauth2flow` because go-oidc rejects the empty
+  bearer.
 
 ## Failure modes you might hit
 
@@ -129,6 +183,8 @@ keeps its state).
 | Port 6274 already in use                             | Another inspector / app on that port.                   | `lsof -i :6274` — kill or change the host port in `compose.yaml`. |
 | Inspector shows "connection refused" on first connect | Browser → container path; needs port publishing.        | Uncomment `ports: ["8090:8090"]` on `demo-mcp` and rebuild. |
 | Inspector shows 401 / "unauthorized" on the tools list | Missing or wrong `Authorization: Bearer` header in the inspector's headers panel (Phase 1b). | Copy `MCP_BOUNDARY_TOKEN` value from `demo/.env` into the inspector and reconnect. |
+| OIDC variant tools return `upstream 401` on every call | `MCP_OAUTH2_SERVICE_TOKEN` empty or invalid (Phase 5). | `make demo-mint-service-token`, paste into `demo/.env`, `make demo-rebuild`. |
+| OIDC variant inspector tools list fails with 401 | The inspector's pasted JWT is expired (1h lifetime), wrong audience, or signed by a previous demo-idp container instance. | `make demo-mint-user-token` and re-paste. |
 | Tool calls return `"<tool>: ok"`                     | You're on a generator commit before IMPL-0002 phase 1.  | `git pull` and `make demo-rebuild`.                |
 | `make ci` fails after editing `demo/api/`            | Something in `demo/api/` started failing repo-root tests. | The demo's separate `go.mod` should keep CI clean — investigate the actual failure. |
 

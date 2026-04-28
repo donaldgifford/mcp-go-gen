@@ -1,7 +1,7 @@
 ---
 id: IMPL-0002
 title: "Docker Compose demo and integration harness"
-status: In Progress
+status: Completed
 author: Donald Gifford
 created: 2026-04-27
 ---
@@ -9,7 +9,7 @@ created: 2026-04-27
 
 # IMPL 0002: Docker Compose demo and integration harness
 
-**Status:** In Progress — phases 1–3 complete (MVP delivered); phases 4 and 5 gated on out-of-scope follow-up IMPLs.
+**Status:** Completed — phases 1–5 shipped end-to-end; Phase 4 and Phase 5 generator support landed inline rather than via separate IMPLs.
 **Author:** Donald Gifford
 **Date:** 2026-04-27
 
@@ -228,38 +228,36 @@ Adds POST/PUT tools to the demo. The demo's role here is to be the consumer that
 
 ### Phase 5: OAuth2/OIDC flow (design phase 2)
 
-> **Gated.** Phase 5 is blocked on three independent prerequisites: an INV doc that picks the test issuer, generator support for the proxy bearer-from-token-source semantics covered by Resolved OQ #7 (deferred service-account variant ships first; user-JWT forwarding lands in a follow-up IMPL), and inspector flow for OIDC tokens. None of these prereqs have started; phase 5 sits until they do.
-
-Adds the `/api/oauth2flow` tree to the demo API, an OIDC issuer service to compose, and OIDC tools to the demo MCP.
+Adds the `/api/oauth2flow` tree to the demo API, an OIDC issuer service to compose, and OIDC tools to the demo MCP. Ships behind a separate `make demo-up-oidc` target so Phase 4's bearer flow stays usable in parallel.
 
 #### Tasks
 
 **Investigation prereq**
 
-- [ ] Open an INV doc to evaluate dex vs Keycloak vs hand-rolled JWKS for the demo's test issuer. Score on: bootstrap complexity, image size, ability to declare the issuer + audience + signing key in a single config file, license, container image trust.
-- [ ] Land the INV with a recommendation; update DESIGN-0005 Open Question #1 to "Resolved" with the chosen issuer.
+- [x] Open an INV doc to evaluate dex vs Keycloak vs hand-rolled JWKS for the demo's test issuer. Score on: bootstrap complexity, image size, ability to declare the issuer + audience + signing key in a single config file, license, container image trust. _Filed as INV-0001._
+- [x] Land the INV with a recommendation; update DESIGN-0005 Open Question #1 to "Resolved" with the chosen issuer. _INV concluded with hand-rolled JWKS issuer (Option C); ~120 LOC Go service in `demo/idp/`._
 
 **API tree**
 
-- [ ] Add OIDC validation to `demo/api/middleware.go`: `oidcAuth(issuer, audience string)` that fetches JWKS at startup, validates RS256 JWT signatures, checks `iss`, `aud`, `exp`, `nbf`. Use `github.com/coreos/go-oidc/v3` (already in the generator's transitive deps; demo can pull it directly).
-- [ ] Wire `/api/oauth2flow/*` routes mirroring the bearer tree, wrapped with `oidcAuth`.
-- [ ] Add `DEMO_OIDC_ISSUER` and `DEMO_OIDC_AUDIENCE` to `demo/.env.example` and `demo/api/main.go` env reads.
+- [x] Add OIDC validation to `demo/api/middleware.go`: `oidcAuth(issuer, audience string)` that fetches JWKS at startup, validates RS256 JWT signatures, checks `iss`, `aud`, `exp`, `nbf`. Use `github.com/coreos/go-oidc/v3` (already in the generator's transitive deps; demo can pull it directly). _Lives in `demo/api/oidc.go` to keep the bearer middleware file unchanged. Constructor takes a `context.Context` so JWKS fetch respects shutdown signals._
+- [x] Wire `/api/oauth2flow/*` routes mirroring the bearer tree, wrapped with `oidcAuth`.
+- [x] Add `DEMO_OIDC_ISSUER` and `DEMO_OIDC_AUDIENCE` to `demo/.env.example` and `demo/api/main.go` env reads. _When either env is empty the API wires a `oidcUnavailableMiddleware` that returns 503 — Phases 1–4 still work without demo-idp running._
 
 **Issuer service**
 
-- [ ] Add `demo-idp` to `demo/compose.yaml` per the INV's recommendation. Static config (single client, single audience, single signing key) baked in via env or a mounted config file. No persistence.
-- [ ] `demo-idp` exposes its issuer URL on the internal network (`http://demo-idp:5556` or similar) and is reachable by `demo-api` for JWKS fetch.
-- [ ] Add `depends_on.demo-idp.condition: service_started` to `demo-api` so JWKS fetch at startup succeeds.
+- [x] Add `demo-idp` to `demo/compose.yaml` per the INV's recommendation. Static config (single client, single audience, single signing key) baked in via env or a mounted config file. No persistence. _Built from `demo/idp/`; signing key generated in-memory at startup, declarative via `IDP_ISSUER` + `IDP_AUDIENCE` env vars._
+- [x] `demo-idp` exposes its issuer URL on the internal network (`http://demo-idp:5556` or similar) and is reachable by `demo-api` for JWKS fetch. _Also publishes `:5556` to the host so `make demo-mint-{service,user}-token` can `curl` it without an exec into the container._
+- [x] Add `depends_on.demo-idp.condition: service_started` to `demo-api` so JWKS fetch at startup succeeds.
 
 **MCP wiring**
 
-- [ ] Update `demo/mcpgen.hcl`: change `auth { bearer {…} }` to `auth { oidc { issuer = "…" audience = "…" } }` so the MCP boundary validates inspector-supplied OIDC JWTs. The proxy block stays as-is (static service-account bearer to API).
-- [ ] Wire the API side per Resolved OQ #7: the MCP forwards a **separate static service-account bearer** to `/api/oauth2flow` (not the user's JWT), so `/api/oauth2flow` is in practice bearer-protected from the MCP's POV. The API still validates the same incoming string against the issuer's JWKS so the OIDC code path is exercised — the service-account token is itself a JWT issued by the test issuer with the right `aud`. Document this clearly in `demo/README.md` so the storytelling distinction (OIDC at the boundary, separate identity for proxy) is explicit.
+- [x] Update `demo/mcpgen.hcl`: change `auth { bearer {…} }` to `auth { oidc { issuer = "…" audience = "…" } }` so the MCP boundary validates inspector-supplied OIDC JWTs. The proxy block stays as-is (static service-account bearer to API). _Shipped as a parallel `demo/mcpgen-oidc.hcl` rather than overwriting the bearer config so Phase 4's eight-tool flow stays available via the default `make demo-up`. `make demo-up-oidc` regenerates from the OIDC variant._
+- [x] Wire the API side per Resolved OQ #7: the MCP forwards a **separate static service-account bearer** to `/api/oauth2flow` (not the user's JWT), so `/api/oauth2flow` is in practice bearer-protected from the MCP's POV. The API still validates the same incoming string against the issuer's JWKS so the OIDC code path is exercised — the service-account token is itself a JWT issued by the test issuer with the right `aud`. Document this clearly in `demo/README.md` so the storytelling distinction (OIDC at the boundary, separate identity for proxy) is explicit. _Mint via `make demo-mint-service-token` (curls demo-idp's `/token`); paste into `demo/.env` as `MCP_OAUTH2_SERVICE_TOKEN`; `make demo-rebuild`._
 
 **Documentation and verification**
 
-- [ ] Document inspector OIDC flow in `demo/README.md`: how to obtain a test JWT (likely `curl demo-idp/token` with client credentials), how to paste it into the inspector.
-- [ ] Manual verification: with a valid OIDC token, all OIDC-flagged tools work; with an expired/wrong token, the inspector sees a 401-shaped error.
+- [x] Document inspector OIDC flow in `demo/README.md`: how to obtain a test JWT (likely `curl demo-idp/token` with client credentials), how to paste it into the inspector. _Plus three negative-path recipes (wrong audience, expired token, missing service-account JWT) in the new failure-modes rows._
+- [x] Manual verification: with a valid OIDC token, all OIDC-flagged tools work; with an expired/wrong token, the inspector sees a 401-shaped error. _Codified as automated tests in `demo/api/oidc_test.go` (against an in-process fake IDP that mirrors the demo-idp protocol): valid JWT → 200, missing header → 401 + WWW-Authenticate, wrong audience → 401, factory rejects empty issuer/audience. Plus generator smoke-build of the OIDC variant in `/tmp` confirms the generated tree compiles cleanly._
 
 #### Success Criteria
 

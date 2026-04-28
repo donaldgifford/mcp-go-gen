@@ -36,16 +36,26 @@ func run() error {
 	store := NewStore()
 	store.Seed(SeedRecords())
 
-	mux := buildMux(store, bearer)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	// OIDC middleware is constructed once at startup so JWKS fetch + cache
+	// happen before serving. When the env vars are absent the
+	// /api/oauth2flow tree is wired with a 503 stub so the rest of the API
+	// still serves; this lets the demo API run in Phase 1/2/3/4 modes
+	// (no demo-idp service) without complaint.
+	oidcMW, oidcErr := buildOIDCMiddleware(ctx)
+	if oidcErr != nil {
+		slog.Warn("oidc middleware unavailable; /api/oauth2flow will return 503", "err", oidcErr)
+	}
+
+	mux := buildMux(store, bearer, oidcMW)
 
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           accessLog(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -69,7 +79,11 @@ func run() error {
 // buildMux wires every route the demo API serves. Extracted from run so
 // handler tests can construct the same mux without spinning up signal
 // handlers and listeners.
-func buildMux(store *Store, bearerToken string) *http.ServeMux {
+//
+// oidcMW is nil when the demo-idp service isn't running (or when JWKS
+// fetch failed at startup); the /api/oauth2flow routes fall back to a
+// 503 stub so the rest of the API still serves.
+func buildMux(store *Store, bearerToken string, oidcMW func(http.Handler) http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -89,7 +103,41 @@ func buildMux(store *Store, bearerToken string) *http.ServeMux {
 	mux.Handle("POST /api/bearer/{id}", auth(updateHandler(store)))
 	mux.Handle("PUT /api/bearer", auth(createHandler(store)))
 
+	// /api/oauth2flow/* — wrapped with OIDC. Falls back to a 503 stub
+	// when the middleware couldn't be built (issuer unreachable at
+	// startup, env vars unset, etc.).
+	wrap := oidcMW
+	if wrap == nil {
+		wrap = oidcUnavailableMiddleware
+	}
+	mux.Handle("GET /api/oauth2flow", wrap(listHandler(store)))
+	mux.Handle("GET /api/oauth2flow/{id}", wrap(getHandler(store)))
+	mux.Handle("POST /api/oauth2flow/{id}", wrap(updateHandler(store)))
+	mux.Handle("PUT /api/oauth2flow", wrap(createHandler(store)))
+
 	return mux
+}
+
+// buildOIDCMiddleware reads DEMO_OIDC_ISSUER and DEMO_OIDC_AUDIENCE and
+// constructs the verifier-backed middleware. Returns (nil, nil) when the
+// env vars are unset — the caller treats that as "Phase 5 not active"
+// rather than a startup failure.
+func buildOIDCMiddleware(ctx context.Context) (func(http.Handler) http.Handler, error) {
+	issuer := os.Getenv("DEMO_OIDC_ISSUER")
+	audience := os.Getenv("DEMO_OIDC_AUDIENCE")
+	if issuer == "" || audience == "" {
+		return nil, nil //nolint:nilnil // sentinel: env-driven feature off, not an error
+	}
+	return oidcAuth(ctx, issuer, audience)
+}
+
+// oidcUnavailableMiddleware returns a 503 on every protected route when
+// the verifier wasn't built. Surfaces clearly in the inspector + curl so
+// users notice the demo-idp service isn't running.
+func oidcUnavailableMiddleware(_ http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "/api/oauth2flow requires the demo-idp service", http.StatusServiceUnavailable)
+	})
 }
 
 func envDefault(key, def string) string {

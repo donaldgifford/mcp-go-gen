@@ -8,12 +8,33 @@
 name: mcpgen-demo
 
 services:
+  demo-idp:
+    # Phase 5 (IMPL-0002): hand-rolled OIDC issuer per INV-0001 — issues
+    # RS256 JWTs over /token, exposes /jwks.json + discovery doc.
+    # Published to the host so users can `curl localhost:5556/token` and
+    # paste the result into the inspector's auth panel.
+    build: ./idp
+    environment:
+      IDP_ISSUER: ${IDP_ISSUER:-http://demo-idp:5556}
+      IDP_AUDIENCE: ${IDP_AUDIENCE:-mcp-demo-api}
+    ports:
+      - "5556:5556"
+    restart: unless-stopped
+
   demo-api:
     build: ./api
     environment:
       DEMO_API_ADDR: ":8080"
       DEMO_BEARER_TOKEN: ${DEMO_BEARER_TOKEN}
       DEMO_LOG_LEVEL: ${DEMO_LOG_LEVEL:-info}
+      # OIDC middleware on /api/oauth2flow only activates when these are
+      # set. Empty values leave the route returning 503 (the demo API
+      # remains usable for Phases 1–4).
+      DEMO_OIDC_ISSUER: ${IDP_ISSUER:-http://demo-idp:5556}
+      DEMO_OIDC_AUDIENCE: ${IDP_AUDIENCE:-mcp-demo-api}
+    depends_on:
+      demo-idp:
+        condition: service_started
     # No healthcheck: the distroless runtime image has no shell or wget,
     # so a Compose CMD healthcheck can't run. demo-api starts in <1s
     # so service_started below is sufficient. The /healthz route exists
@@ -32,6 +53,12 @@ services:
       # one value on /mcp. The inspector pastes a matching
       # `Authorization: Bearer …` into its UI before connecting.
       MCP_BOUNDARY_TOKEN: ${MCP_BOUNDARY_TOKEN}
+      # Phase 2 (IMPL-0002 Phase 5): static service-account JWT used by
+      # the proxy to call /api/oauth2flow. Mint via
+      # `make demo-mint-service-token` (see demo/README.md). Empty by
+      # default — Phase 5 OIDC tools fail at the upstream side until
+      # this is set, but the rest of the demo continues to work.
+      MCP_OAUTH2_SERVICE_TOKEN: ${MCP_OAUTH2_SERVICE_TOKEN:-}
     depends_on:
       demo-api:
         condition: service_started

@@ -18,7 +18,7 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 	store := NewStore()
 	store.Seed(SeedRecords())
 	const bearer = "test-token"
-	srv := httptest.NewServer(buildMux(store, bearer))
+	srv := httptest.NewServer(buildMux(store, bearer, nil))
 	t.Cleanup(srv.Close)
 	return srv, bearer
 }
