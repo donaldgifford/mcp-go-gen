@@ -39,6 +39,10 @@ This project uses a `make`-driven workflow. Tool versions are pinned in `mise.to
 - `make ci` — full CI pipeline locally (`lint` + `test` + `build` + `license-check`).
 - `make license-check` — `go-licenses` check against the allowed list (Apache-2.0, MIT, BSD-2/3, ISC, MPL-2.0).
 - `make release-check` / `make release-local` — validate and snapshot-build via goreleaser without publishing.
+- `make demo-up` / `make demo-up-oidc` — bring up the IMPL-0002 Compose stack (3 services bearer / 4 services with `demo-idp`). Refuses if `demo/.env` is missing.
+- `make demo-down` / `make demo-logs` / `make demo-rebuild` / `make demo-clean` — tear down (with volume cleanup), tail logs, restart, blow away regenerated tree.
+- `make demo-test` — run the demo's separate-module Go tests (`demo/api/` and `demo/idp/`); CI's `make ci` deliberately doesn't descend there per IMPL-0002 Resolved OQ #3.
+- `make demo-mint-service-token` / `make demo-mint-user-token` — curl `demo-idp/token` and print a JWT for `.env` paste / inspector paste respectively (Phase 5 only).
 
 Running a single Go test within a package: `go test -v -race -run TestName ./path/to/pkg`.
 
@@ -70,6 +74,7 @@ The `metadata-action` `images:` input must be the full image name (`ghcr.io/dona
 - `internal/openapi/` — wraps `github.com/pb33f/libopenapi`. `Load(path)` rejects Swagger 2.0 and remote `$ref` entries up front, then builds the v3 model. `(*Doc).Operation(id)` scans every method on every PathItem and returns the first match flattened into `{Method, Path, Summary, Parameters[]}`. Type mapping lives in `resolveSchema`; nested `object` parameters short-circuit here with the canonical rejection message. `config.ToIR` consumes these via `applyOpenAPIMerge` in `internal/config/convert.go`.
 - `internal/dst/` — wraps `github.com/dave/dst` + `dst/decorator` for structural edits to user Go source. `Edit(src, pkgPath, pkgAlias)` locates the `// mcpgen:hook` marker inside `func main`, inserts an `if err := <alias>.Register(ctx, app, cfg); err != nil { log.Fatalf(...) }` block after it, and adds the import — idempotently. Structural AST compare (`hasRegisterCall`) drives the "already embedded" no-op path; `EditResult.Changed` tells the caller whether to rewrite the file.
 - `internal/scaffold/modpath.go:ModulePath` walks upward from `--out` looking for `go.mod` and returns the declared module path. Embed mode uses this to wire the correct import paths through `ir.Spec.ModulePath`.
+- `demo/` — IMPL-0002 demo harness, three separate Go modules (intentionally — see Resolved OQ #3) that don't bleed into the generator's go.mod / govulncheck / Trivy. `demo/api/` is a hand-written HTTP service with three auth trees (`/api/noauth`, `/api/bearer`, `/api/oauth2flow`); `demo/idp/` is the Phase 5 OIDC issuer (per INV-0001, hand-rolled RS256 JWKS issuer chosen over dex/Keycloak); `demo/mcp-server/` is the regenerated MCP server (gitignored). Two parallel HCL specs drive it: `demo/mcpgen.hcl` (bearer flow, eight tools) and `demo/mcpgen-oidc.hcl` (OIDC flow, four tools). `demo/compose.yaml` wires three or four services on a user-defined bridge; `mcp-inspector` listens on `:6274`, `demo-idp` publishes `:5556` so the host can `curl /token`.
 
 ## Renderer conventions
 

@@ -116,23 +116,37 @@ and observability defaults — lives in [`docs/using-mcpgen.md`](docs/using-mcpg
   (two codegen technologies, two output modes, sealed auth sum type).
 - [DESIGN-0004](docs/design/0004-mcpgen-generator.md) — detailed design of
   the generator pipeline.
+- [DESIGN-0005](docs/design/0005-docker-compose-demo-and-integration-harness.md) —
+  Docker Compose demo and integration harness design.
 - [IMPL-0001](docs/impl/0001-mcpgen-generator-implementation.md) —
-  phase-by-phase implementation tracker.
+  phase-by-phase implementation tracker (generator MVP).
+- [IMPL-0002](docs/impl/0002-docker-compose-demo-and-integration-harness.md) —
+  demo harness phase tracker (covers Phases 1–5 plus the Phase 4 inline
+  generator work for write-mutation tools).
+- [INV-0001](docs/investigation/0001-oidc-issuer-for-impl-0002-demo.md) —
+  OIDC issuer choice for the demo (hand-rolled JWKS over dex/Keycloak).
 
 ## Status
 
 The MVP ships all four auth schemes, both output modes, both proxy-input
-flavors, and idempotent regeneration under CI. Known gaps tracked in
-IMPL-0001 Phase 7 backlog: request-body parameters for OpenAPI
-operations, full `Register` body in embed mode, `--allow-missing-operations`
-flag.
+flavors, GET + POST/PUT/PATCH proxy with JSON body marshaling
+(`body_param` HCL block, optional fields surface only when present), and
+idempotent regeneration under CI. Tool results auto-detect JSON vs text
+upstream responses and use mark3labs/mcp-go's structured-content helpers
+when applicable. Known gaps tracked in IMPL-0001 Phase 7 backlog:
+request-body parameters for OpenAPI operations, full `Register` body in
+embed mode, `--allow-missing-operations` flag, end-to-end OIDC token
+forwarding through the proxy.
 
 ## Try it locally
 
 A self-contained Docker Compose demo lives at [`demo/`](demo/) — run
 `make demo-up` to bring up a generated MCP server + a small Go API +
-the official MCP Inspector on a single bridge network. See
-[`demo/README.md`](demo/README.md) for the walkthrough.
+the official MCP Inspector on a single bridge network. The default flow
+exercises the bearer auth variant; `make demo-up-oidc` swaps in the OIDC
+variant against a hand-rolled `demo-idp` issuer (per
+[INV-0001](docs/investigation/0001-oidc-issuer-for-impl-0002-demo.md)).
+See [`demo/README.md`](demo/README.md) for the walkthrough.
 
 ## Contributing
 

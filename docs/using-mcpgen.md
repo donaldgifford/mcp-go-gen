@@ -182,11 +182,9 @@ tool "create_rfc" {
   backend "http" {
     method = "POST"
     path   = "/rfcs"
-    body_json {
-      field "title"   { from = "title" }
-      field "author"  { from = "author" }
-      field "body_md" { from = "body_md" }
-    }
+    body_param "title"   { from = "title" }
+    body_param "author"  { from = "author" }
+    body_param "body_md" { from = "body_md" }
     response { type = "json" }
   }
 }
