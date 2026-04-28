@@ -1,3 +1,4 @@
+---
 # IMPL-0002 demo stack — generated MCP + minimal Go API + MCP Inspector,
 # all on a single user-defined bridge so the inspector can reach the MCP
 # server by Compose service name without host.docker.internal gymnastics.
@@ -69,8 +70,24 @@ services:
 
   mcp-inspector:
     image: ghcr.io/modelcontextprotocol/inspector:latest
+    environment:
+      # Inspector v0.21+ binds to localhost (127.0.0.1) inside the
+      # container by default, so Docker's host port forward has nothing
+      # on the bridge interface to talk to — TCP connects then resets.
+      # HOST=0.0.0.0 makes the UI server (6274) and proxy (6277) listen
+      # on every interface so the published ports actually work.
+      HOST: 0.0.0.0
+      # Skip the per-session auth token. Acceptable for a local demo —
+      # the inspector's anti-DNS-rebinding guard would otherwise force
+      # users to copy a 64-char session token from the container logs
+      # on every restart.
+      DANGEROUSLY_OMIT_AUTH: "true"
     ports:
+      # 6274: the React UI. 6277: the proxy backend the UI calls into
+      # (and where the actual MCP transport originates). Both must be
+      # reachable from the host browser.
       - "6274:6274"
+      - "6277:6277"
     depends_on:
       demo-mcp:
         # service_started: the generated MCP server has no /healthz today
